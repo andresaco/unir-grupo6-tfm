@@ -4,6 +4,7 @@ import os
 import random
 import time
 from datetime import datetime, timedelta
+
 from playwright.async_api import async_playwright
 
 # --- CONFIGURACIÓN DE RUTA AL ESCRITORIO ---
@@ -77,7 +78,8 @@ async def ejecutar_captura():
                             
                             if len(tweets_capturados) >= OBJETIVO_TWEETS:
                                 break
-                    except:
+                    except Exception as e:
+                        print(f"Error al procesar un tweet: {e}")
                         continue
 
                 await page.mouse.wheel(0, random.randint(1200, 2000))
@@ -103,7 +105,7 @@ def bucle_principal():
     while datetime.now() < fecha_fin:
         asyncio.run(ejecutar_captura())
         espera = 3600 + random.randint(0, 300)
-        print(f"Dormido hasta la siguiente hora...")
+        print("Dormido hasta la siguiente hora...")
         time.sleep(espera)
 
 if __name__ == "__main__":
