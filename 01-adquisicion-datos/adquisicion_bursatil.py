@@ -5,6 +5,16 @@ from openpyxl.chart import LineChart, BarChart, Reference
 from openpyxl.styles import Font, Alignment, PatternFill
 
 def ejecutar_desarrollo():
+    """
+    Ejecuta el flujo completo de adquisición y reporte de datos bursátiles.
+
+    Descarga datos históricos de Apple (AAPL) del último mes, calcula indicadores
+    técnicos básicos (Evolución % y Media Móvil), extrae datos fundamentales
+    y genera un archivo Excel con formato y gráficos integrados.
+
+    Raises:
+        Exception: Si ocurre un error durante la descarga o el procesamiento de datos.
+    """
     try:
         ticker_symbol = "AAPL"
         print(f"--- Iniciando proceso para {ticker_symbol} ---")
