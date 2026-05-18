@@ -10,3 +10,4 @@ python-dotenv
 
 # Otras dependencias
 tqdm
+dotenv

@@ -15,6 +15,7 @@ import torch
 from tqdm import tqdm
 import psutil
 from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+from dotenv import load_dotenv
 
 
 class Colors:
@@ -67,10 +68,19 @@ def validate_inputs(file_path, column_name):
     return True
 
 def load_sentiment_pipeline():
-    """Carga de manera segura el modelo de NLP."""
+    """Carga de manera segura el modelo de NLP.
+    
+    Inicializa y devuelve un pipeline de Hugging Face para análisis de sentimientos.
+    Si es la primera vez que se ejecuta, descargará los pesos del modelo.
+    
+    Returns:
+        transformers.pipelines.Pipeline: El pipeline de clasificación de texto inicializado.
+        
+    Raises:
+        SystemExit: Si ocurre un error crítico al cargar el modelo o el tokenizador.
+    """
     model_name = "lxyuan/distilbert-base-multilingual-cased-sentiments-student"
     print(f"{Colors.WARNING}Cargando el modelo '{model_name}' en memoria...{Colors.ENDC}")
-    print("*(Si es la primera vez que lo ejecutas, se descargarán aprox. 270 MB de internet)*")
     
     start_time = time.time()
     try:
@@ -97,7 +107,17 @@ def load_sentiment_pipeline():
         sys.exit(1)
 
 def run_sentiment_analysis(file_path, column_name, batch_size=32):
-    """Lee el CSV, ejecuta el análisis por lotes (batches) e instrumenta el proceso."""
+    """Lee el CSV, ejecuta el análisis por lotes (batches) e instrumenta el proceso.
+    
+    Procesa los textos de la columna especificada, calcula el sentimiento y la 
+    confianza (score) y guarda los resultados en un nuevo archivo CSV con un 
+    timestamp en el nombre. Muestra además estadísticas de rendimiento y uso.
+    
+    Args:
+        file_path (str): La ruta al archivo CSV de entrada.
+        column_name (str): El nombre de la columna que contiene los textos a analizar.
+        batch_size (int, optional): El tamaño del lote para el procesamiento. Por defecto es 32.
+    """
     print_banner()
     
     # Validar entradas
@@ -194,6 +214,9 @@ def run_sentiment_analysis(file_path, column_name, batch_size=32):
     print("\n")
 
 if __name__ == "__main__":
+    # Cargar variables de entorno desde un archivo .env si existe
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="Script optimizado de análisis de sentimientos local para CPU.")
     parser.add_argument("--file", type=str, help="Ruta del archivo CSV de entrada.")
     parser.add_argument("--col", type=str, help="Nombre de la columna de texto a analizar.")
