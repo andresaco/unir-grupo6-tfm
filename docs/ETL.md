@@ -74,3 +74,12 @@ El nombre del archivo incluye un timestamp para evitar sobrescribir datos.
 - En la primera ejecución, Playwright puede requerir autenticación manual en X.com.
 - Si el login se muestra, el flujo esperará hasta que aparezcan tweets.
 - El modelo de sentimiento usado por defecto es `cardiffnlp/twitter-roberta-base-sentiment-latest`.
+
+# Gestión de credenciales
+
+## Bluesky
+
+- Crea cuenta en Bluesky (https://bsky.app)
+- Accede a [https://bsky.app/settings/app-passwords](https://bsky.app/settings/app-passwords)
+- Crea una password nueva
+- En el fichero .env almacena las credenciales BLUESKY_HANDLE con tu nombre de usuario y BLUESKY_PASSWORD con la que acabas de generar.
