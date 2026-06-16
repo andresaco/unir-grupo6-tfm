@@ -24,7 +24,7 @@ DEFAULT_PROFILE_DIR = os.environ.get(
 DEFAULT_MODEL = os.environ.get(
     "SENTIMENT_MODEL", "cardiffnlp/twitter-roberta-base-sentiment-latest"
 )
-DEFAULT_OUTPUT_DIR = os.environ.get("ETL_OUTPUT_DIR", "datos")
+DEFAULT_OUTPUT_DIR = os.environ.get("ETL_OUTPUT_DIR", "data/01_raw/twitter")
 DEFAULT_HEADLESS = os.environ.get("PLAYWRIGHT_HEADLESS", "False").lower() in (
     "true",
     "1",

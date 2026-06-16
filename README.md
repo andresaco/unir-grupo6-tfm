@@ -43,4 +43,4 @@ mi-proyecto-ml/
 └── models/                  # Artefactos locales serializados (¡Excluido de Git!)
     ├── model_v1.pkl         # Binario o pesos del modelo entrenado
     └── encoder.pkl          # Transformadores de variables categóricas o escaladores
-``` 
+```
