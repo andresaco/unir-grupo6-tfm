@@ -7,11 +7,14 @@ requires-python = ">=3.14"
 dependencies = [
     "atproto>=0.0.68",
     "dagster>=1.13.9",
+    "dagster-webserver>=1.13.9",
     "dotenv>=0.9.9",
-    "mlflow>=1.27.0",
-    "pandas>=3.0.3",
+    "mlflow>3.0.0",
+    "pandas<3.0.0",
     "playwright>=1.60.0",
+    "scikit-learn>=1.9.0",
     "transformers>=5.12.1",
+    "yfinance>=1.4.1",
 ]
 
 [dependency-groups]

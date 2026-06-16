@@ -11,8 +11,8 @@ from dagster import Out, job, op
 from dotenv import load_dotenv
 from transformers import pipeline
 
-from core.social import SocialSearchClient
-from core.social.bsky import BlueskyClient
+from .core.social import SocialSearchClient
+from .core.social.bsky import BlueskyClient
 
 load_dotenv()
 
