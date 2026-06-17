@@ -10,7 +10,7 @@ from dagster import (
 )
 
 
-# 1. Definimos la configuración parametrizable
+# Definimos la configuración parametrizable compartida
 class StockDownloadConfig(Config):
     ticker: str = "AAPL"
     initial_date: str = "2020-01-01"  # Formato YYYY-MM-DD
@@ -24,10 +24,6 @@ class StockDownloadConfig(Config):
 def raw_stock_data(
     context: AssetExecutionContext, config: StockDownloadConfig
 ) -> MaterializeResult:
-    """
-    Asset que descarga datos de mercado basados en parámetros de configuración
-    y los persiste en formato CSV en la capa raw.
-    """
     ticker = config.ticker
     start_date = config.initial_date
     end_date = config.end_date
@@ -36,7 +32,6 @@ def raw_stock_data(
         f"Iniciando descarga de datos para {ticker} desde {start_date} hasta {end_date}..."
     )
 
-    # 2. Descarga de datos usando yfinance
     df = yf.download(ticker, start=start_date, end=end_date, progress=False)
 
     if df.empty:
@@ -44,33 +39,22 @@ def raw_stock_data(
             f"No se pudieron descargar datos para el ticker {ticker} en el rango {start_date} a {end_date}."
         )
 
-    # Aplanar el MultiIndex que a veces devuelve yfinance y convertir el índice 'Date' en columna
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
     df.reset_index(inplace=True)
 
-    # 3. Creación dinámica del directorio si no existe
     output_dir = "data/01_raw/stock"
     os.makedirs(output_dir, exist_ok=True)
-
-    # 4. Formateo de la ruta de salida solicitada
-    filename = f"{ticker}_{start_date}_{end_date}.csv"
-    filepath = os.path.join(output_dir, filename)
-
-    # 5. Persistencia del CSV
+    filepath = os.path.join(output_dir, f"{ticker}_{start_date}_{end_date}.csv")
     df.to_csv(filepath, index=False)
 
-    context.log.info(f"Datos descargados exitosamente y guardados en: {filepath}")
+    context.log.info(f"Datos guardados en: {filepath}")
 
-    # 6. Devolver el resultado materializado con metadatos para la UI de Dagster
     return MaterializeResult(
         metadata={
             "filepath": MetadataValue.path(filepath),
             "ticker": MetadataValue.text(ticker),
-            "start_date": MetadataValue.text(start_date),
-            "end_date": MetadataValue.text(end_date),
             "total_rows": MetadataValue.int(len(df)),
-            "columns": MetadataValue.text(str(list(df.columns))),
         }
     )
 
@@ -82,10 +66,6 @@ def raw_stock_data(
 def raw_vix_data(
     context: AssetExecutionContext, config: StockDownloadConfig
 ) -> MaterializeResult:
-    """
-    Asset que descarga los datos del VIX (^VIX) utilizando las mismas fechas
-    configuradas para la descarga de cotizaciones.
-    """
     ticker_vix = "^VIX"
     start_date = config.initial_date
     end_date = config.end_date
@@ -94,7 +74,6 @@ def raw_vix_data(
         f"Iniciando descarga de datos para {ticker_vix} desde {start_date} hasta {end_date}..."
     )
 
-    # Descarga de datos usando yfinance
     df_vix = yf.download(ticker_vix, start=start_date, end=end_date, progress=False)
 
     if df_vix.empty:
@@ -102,32 +81,107 @@ def raw_vix_data(
             f"No se pudieron descargar datos para el VIX en el rango {start_date} a {end_date}."
         )
 
-    # Aplanar el MultiIndex y convertir el índice 'Date' en columna (igual que el notebook)
     if isinstance(df_vix.columns, pd.MultiIndex):
         df_vix.columns = df_vix.columns.droplevel(1)
     df_vix.reset_index(inplace=True)
 
-    # Creación dinámica del directorio si no existe
     output_dir = "data/01_raw/stock"
     os.makedirs(output_dir, exist_ok=True)
-
-    # Formateo de la ruta de salida (Reemplazamos el ^ para que el nombre de archivo sea limpio)
-    filename = f"VIX_{start_date}_{end_date}.csv"
-    filepath = os.path.join(output_dir, filename)
-
-    # Persistencia del CSV
+    filepath = os.path.join(output_dir, f"VIX_{start_date}_{end_date}.csv")
     df_vix.to_csv(filepath, index=False)
 
-    context.log.info(
-        f"Datos del VIX descargados exitosamente y guardados en: {filepath}"
-    )
+    context.log.info(f"Datos guardados en: {filepath}")
 
     return MaterializeResult(
         metadata={
             "filepath": MetadataValue.path(filepath),
-            "ticker": MetadataValue.text(ticker_vix),
-            "start_date": MetadataValue.text(start_date),
-            "end_date": MetadataValue.text(end_date),
             "total_rows": MetadataValue.int(len(df_vix)),
+        }
+    )
+
+
+@asset(
+    deps=[raw_stock_data],
+    group_name="processing",
+    description="Estandariza los nombres de las columnas de stock a minúsculas en la capa Silver.",
+)
+def processed_stock_data(
+    context: AssetExecutionContext, config: StockDownloadConfig
+) -> MaterializeResult:
+    """
+    Asset de procesamiento (Silver). Toma el archivo de cotización descargado en Raw,
+    limpia y renombra las columnas a minúsculas, y lo almacena en la capa Processed.
+    """
+    ticker = config.ticker
+    start_date = config.initial_date
+    end_date = config.end_date
+
+    raw_path = f"data/01_raw/stock/{ticker}_{start_date}_{end_date}.csv"
+    if not os.path.exists(raw_path):
+        raise FileNotFoundError(
+            f"No se encontró el archivo raw de stock en: {raw_path}"
+        )
+
+    context.log.info(f"Cargando archivo raw de cotización desde {raw_path}...")
+    df = pd.read_csv(raw_path)
+
+    # Transformación: renombrar columnas a minúsculas
+    df.columns = [col.lower() for col in df.columns]
+
+    # Guardar en data/02_processed/stock/ con el mismo nombre que el archivo raw original
+    output_dir = "data/02_processed/stock"
+    os.makedirs(output_dir, exist_ok=True)
+    filepath = os.path.join(output_dir, f"{ticker}_{start_date}_{end_date}.csv")
+    df.to_csv(filepath, index=False)
+
+    context.log.info(f"Datos de stock estandarizados (Silver) guardados en: {filepath}")
+
+    return MaterializeResult(
+        metadata={
+            "filepath_silver": MetadataValue.path(filepath),
+            "total_rows": MetadataValue.int(len(df)),
+            "columns_processed": MetadataValue.text(str(list(df.columns))),
+        }
+    )
+
+
+@asset(
+    deps=[raw_vix_data],
+    group_name="processing",
+    description="Estandariza los nombres de las columnas del VIX a minúsculas en la capa Silver.",
+)
+def processed_vix_data(
+    context: AssetExecutionContext, config: StockDownloadConfig
+) -> MaterializeResult:
+    """
+    Asset de procesamiento (Silver). Toma el archivo VIX descargado en Raw,
+    limpia y renombra las columnas a minúsculas, y lo almacena en la capa Processed.
+    """
+    start_date = config.initial_date
+    end_date = config.end_date
+
+    raw_path = f"data/01_raw/stock/VIX_{start_date}_{end_date}.csv"
+    if not os.path.exists(raw_path):
+        raise FileNotFoundError(f"No se encontró el archivo raw del VIX en: {raw_path}")
+
+    context.log.info(f"Cargando archivo raw de VIX desde {raw_path}...")
+    df_vix = pd.read_csv(raw_path)
+
+    # Transformación: renombrar columnas a minúsculas
+    df_vix.columns = [col.lower() for col in df_vix.columns]
+
+    # Guardar en data/02_processed/stock/ con el mismo nombre que el archivo raw original
+    output_dir = "data/02_processed/stock"
+    os.makedirs(output_dir, exist_ok=True)
+    filepath = os.path.join(output_dir, f"VIX_{start_date}_{end_date}.csv")
+    df_vix.to_csv(filepath, index=False)
+
+    context.log.info(f"Datos de VIX estandarizados (Silver) guardados en: {filepath}")
+
+    return MaterializeResult(
+        metadata={
+            "filepath_silver": MetadataValue.path(filepath),
+            "total_rows": MetadataValue.int(len(df_vix)),
+            "columns_processed": MetadataValue.text(str(list(df_vix.columns))),
         }
     )
