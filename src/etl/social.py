@@ -87,7 +87,7 @@ def raw_social_data(context: AssetExecutionContext, config: StockDownloadConfig)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_ticker = str(ticker).replace(" ", "_")
-    filename = f"sentiment_{safe_ticker}_{timestamp}.csv"
+    filename = f"social_{safe_ticker}_{timestamp}.csv"
     filepath = os.path.join(output_dir, filename)
     df_posts.to_csv(filepath, index=False)
 
@@ -165,9 +165,10 @@ def processed_social_data(context: AssetExecutionContext, raw_social_data: str) 
     df["contenido_texto"] = df["contenido_texto"].astype(str)
 
     # 3. Guardar estado intermedio limpio en un CSV temporal de procesamiento
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = "data/02_processed/social/temp"
     os.makedirs(output_dir, exist_ok=True)
-    filepath_cleaned = os.path.join(output_dir, "social_cleaned_base.csv")
+    filepath_cleaned = os.path.join(output_dir, f"social_cleaned_{timestamp}.csv")
     df.to_csv(filepath_cleaned, index=False)
 
     context.log.info(f"Datos limpios estructuralmente guardados en: {filepath_cleaned}")
@@ -263,24 +264,20 @@ def social_sentiment_analysis(
         df = df.drop(columns=["sentimiento_label", "sentimiento_score"])
 
     # 5. Creación de las columnas de particionado basadas en la fecha
-    df["fecha_utc"] = pd.to_datetime(df["fecha_utc"])
-    df["year"] = df["fecha_utc"].dt.year
-    df["month"] = df["fecha_utc"].dt.month
-    df["day"] = df["fecha_utc"].dt.day
+    df["fecha_utc"] = pd.to_datetime(
+        df["fecha_utc"], format="ISO8601", errors="coerce", utc=True
+    )
 
     # 6. Persistencia en Parquet particionado (Capa Silver Final)
-    output_dir = "data/02_processed/social"
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = "data/02_processed/social/sentiment"
+    filepath_cleaned = os.path.join(output_dir, f"social_sentiment_{timestamp}.csv")
     os.makedirs(output_dir, exist_ok=True)
 
     context.log.info(
         f"Guardando Parquets particionados y enriquecidos con NLP en: {output_dir}"
     )
-    df.to_parquet(
-        output_dir,
-        partition_cols=["year", "month", "day"],
-        index=False,
-        engine="pyarrow",
-    )
+    df.to_csv(filepath_cleaned, index=False)
 
     promedio_sentimiento = (
         float(df["puntuacion_sentimiento"].mean()) if not df.empty else 0.5
@@ -288,10 +285,9 @@ def social_sentiment_analysis(
 
     return MaterializeResult(
         metadata={
-            "directorio_parquet_procesado": MetadataValue.path(output_dir),
+            "fichero_procesado": MetadataValue.path(filepath_cleaned),
             "registros_analizados": MetadataValue.int(len(df)),
             "sentimiento_promedio_nlp": MetadataValue.float(promedio_sentimiento),
             "columnas_finales": MetadataValue.text(str(list(df.columns))),
-            "columnas_particionadas": MetadataValue.text("['year', 'month', 'day']"),
         }
     )
