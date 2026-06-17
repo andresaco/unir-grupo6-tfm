@@ -32,12 +32,10 @@ class BlueskyClient(SocialSearchClient):
         posts_normalized: List[Dict[str, any]] = []
         cursor = None
         remaining = target_tweets
-
+        base_params = {"q": query, "limit": min(target_tweets, 100), "sort": "latest"}
         while remaining > 0:
-            current_limit = min(remaining, 100)
-
             response = self.client.app.bsky.feed.search_posts(
-                params={"q": query, "limit": current_limit, "cursor": cursor}
+                params={**base_params, "cursor": cursor if cursor else None}
             )
 
             if not response.posts:
