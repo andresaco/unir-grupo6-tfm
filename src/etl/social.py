@@ -6,10 +6,10 @@ from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataVal
 from dotenv import load_dotenv
 from transformers import pipeline
 
-from src.etl.stock import (
+from .core.config import (
     StockDownloadConfig,
-)  # Reutilizamos la configuración de fechas para sincronizar
-from src.etl.core.social.bsky import BlueskyClient  # Cliente de Bluesky del proyecto
+)  # Configuración parametrizable para el pipeline social
+from .core.social.bsky import BlueskyClient  # Cliente de Bluesky del proyecto
 
 # Cargar variables de entorno locales (.env)
 load_dotenv()
@@ -35,7 +35,7 @@ def raw_social_data(context: AssetExecutionContext, config: StockDownloadConfig)
     ticker = config.ticker
 
     context.log.info(
-        f"Iniciando extracción de datos de redes sociales para {ticker} ({start_date} a {end_date})..."
+        f"Iniciando extracción de datos de redes sociales para {config.query} ({start_date} a {end_date})..."
     )
 
     # 1. Inicializar DataFrame vacío
@@ -44,9 +44,8 @@ def raw_social_data(context: AssetExecutionContext, config: StockDownloadConfig)
     try:
         # Llamamos a tus módulos de scraping pasándoles los parámetros
         client = BlueskyClient()
-        ticker_query = f"{ticker}"  # Query para buscar menciones del ticker en Bluesky
         # Al ser search_posts asíncrono, lo envolvemos con asyncio.run para ejecutarlo síncronamente en Dagster
-        posts = asyncio.run(client.search_posts(query=ticker_query, target_tweets=300))
+        posts = asyncio.run(client.search_posts(query=config.n, target_tweets=300))
 
         # Si la API de Bluesky no devuelve resultados, forzamos el uso del fallback estructurado
         if not posts or len(posts) == 0:

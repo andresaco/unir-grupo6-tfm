@@ -6,7 +6,7 @@ from dagster import (
 )
 
 # Importamos nuestros módulos que contienen los assets
-from .etl import social, stock, feature_engineering
+from .etl import social, stock, feature_engineering, social_daily
 from .training import train
 from .inference import predict
 
@@ -15,12 +15,18 @@ from .inference import predict
 ingestion_assets = load_assets_from_modules([stock])
 feateng_assets = load_assets_from_modules([feature_engineering])
 social_assets = load_assets_from_modules([social])
+social_daily_assets = load_assets_from_modules([social_daily])
 train_assets = load_assets_from_modules([train])
 inference_assets = load_assets_from_modules([predict])
 
 # Combinamos todos los assets
 all_assets = (
-    ingestion_assets + feateng_assets + social_assets + train_assets + inference_assets
+    ingestion_assets
+    + feateng_assets
+    + social_assets
+    + social_daily_assets
+    + train_assets
+    + inference_assets
 )
 
 # 1. Job para descargar datos de mercado coordinadamente (Stock + VIX)
@@ -42,5 +48,21 @@ social_pipeline_job = define_asset_job(
     description="Ejecuta de manera secuencial y coordinada la ingesta, limpieza estructural y análisis NLP de redes sociales.",
 )
 
+# 2. Creamos el Job específico para el pipeline social de top diario
+social_daily_top_pipeline_job = define_asset_job(
+    name="run_social_daily_top_pipeline",
+    selection=AssetSelection.assets(
+        "raw_daily_social_data",
+        "processed_daily_social_data",
+        "daily_social_sentiment_analysis",
+        "aggregated_daily_social_sentiment",
+    ),
+    description="Extrae los 300 posts más importantes diarios, realiza NLP y agrega los datos por día de forma tolerante a fallos.",
+)
+
+
 # Definimos el repositorio global
-defs = Definitions(assets=all_assets, jobs=[social_pipeline_job, market_download_job])
+defs = Definitions(
+    assets=all_assets,
+    jobs=[social_pipeline_job, market_download_job, social_daily_top_pipeline_job],
+)

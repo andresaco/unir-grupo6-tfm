@@ -3,18 +3,12 @@ import pandas as pd
 import yfinance as yf
 from dagster import (
     asset,
-    Config,
     AssetExecutionContext,
     MaterializeResult,
     MetadataValue,
 )
 
-
-# Definimos la configuración parametrizable compartida
-class StockDownloadConfig(Config):
-    ticker: str = "AAPL"
-    initial_date: str = "2020-01-01"  # Formato YYYY-MM-DD
-    end_date: str = "2023-12-31"  # Formato YYYY-MM-DD
+from .core.config import StockDownloadConfig
 
 
 @asset(
