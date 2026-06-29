@@ -11,6 +11,8 @@ from dagster import (
 from .core.config import StockDownloadConfig
 from ..schemas import validate_df, GdeltSentimentRow
 
+OUTPUT_DIR = "sentiment"
+
 
 @asset(
     group_name="ingestion",
@@ -120,7 +122,7 @@ def raw_gdelt_sentiment_data(
     validate_df(df, GdeltSentimentRow, stage="raw_gdelt_sentiment_data (write raw)")
 
     # Almacenar en la capa raw de sentiment
-    output_dir = "data/01_raw/sentiment"
+    output_dir = f"data/01_raw/{OUTPUT_DIR}"
     os.makedirs(output_dir, exist_ok=True)
     safe_name = str(palabra_clave).lower().replace(" ", "_")
     filename = f"gdelt_{safe_name}_avanzado_{fecha_inicio}_a_{fecha_fin}.csv"
@@ -136,5 +138,67 @@ def raw_gdelt_sentiment_data(
             "total_rows": MetadataValue.int(len(df)),
             "start_date": MetadataValue.text(fecha_inicio),
             "end_date": MetadataValue.text(fecha_fin),
+        }
+    )
+
+
+@asset(
+    deps=[raw_gdelt_sentiment_data],
+    group_name="processing",
+    description="Estandariza y limpia los datos de sentimiento de GDELT en la capa Silver.",
+)
+def processed_gdelt_sentiment_data(
+    context: AssetExecutionContext, config: StockDownloadConfig
+) -> MaterializeResult:
+    """
+    Asset de procesamiento (Silver). Toma el archivo GDELT descargado en Raw,
+    asegura que las columnas estén estandarizadas, normaliza tipos y lo almacena en Processed.
+    """
+    palabra_clave = config.name
+    fecha_inicio = config.initial_date
+    fecha_fin = config.end_date
+
+    safe_name = str(palabra_clave).lower().replace(" ", "_")
+    raw_path = f"data/01_raw/{OUTPUT_DIR}/gdelt_{safe_name}_avanzado_{fecha_inicio}_a_{fecha_fin}.csv"
+
+    if not os.path.exists(raw_path):
+        raise FileNotFoundError(
+            f"No se encontró el archivo raw de GDELT en: {raw_path}"
+        )
+
+    context.log.info(f"Cargando archivo raw de GDELT desde {raw_path}...")
+    df = pd.read_csv(raw_path)
+
+    # Validar al leer raw
+    validate_df(
+        df, GdeltSentimentRow, stage="processed_gdelt_sentiment_data (read raw)"
+    )
+
+    # Estandarizar nombres de columnas a minúsculas y snake_case si no lo estuvieran
+    df.columns = [col.strip().lower() for col in df.columns]
+
+    # Convertir la columna fecha al formato estándar de fecha (sin hora)
+    df["fecha"] = pd.to_datetime(df["fecha"]).dt.date
+
+    # Validar procesado antes de guardar
+    validate_df(
+        df, GdeltSentimentRow, stage="processed_gdelt_sentiment_data (write processed)"
+    )
+
+    # Guardar en data/02_processed/sentiment/
+    output_dir = f"data/02_processed/{OUTPUT_DIR}"
+    os.makedirs(output_dir, exist_ok=True)
+    filepath = os.path.join(
+        output_dir, f"gdelt_{safe_name}_avanzado_{fecha_inicio}_a_{fecha_fin}.csv"
+    )
+    df.to_csv(filepath, index=False)
+
+    context.log.info(f"Datos de GDELT procesados (Silver) guardados en: {filepath}")
+
+    return MaterializeResult(
+        metadata={
+            "filepath_silver": MetadataValue.path(filepath),
+            "total_rows": MetadataValue.int(len(df)),
+            "columns": MetadataValue.text(str(list(df.columns))),
         }
     )

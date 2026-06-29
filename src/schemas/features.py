@@ -3,17 +3,6 @@ from datetime import date as dt_date
 from typing import Optional, Union
 
 
-class GdeltSentimentRow(BaseModel):
-    fecha: Union[str, dt_date]
-    volumen_noticias: int
-    sentimiento_promedio: float
-    puntuacion_positiva: float
-    puntuacion_negativa: float
-    polaridad_promedio: float
-    volatilidad_sentimiento: float
-    uso_primera_persona: float
-
-
 class EngineeredFeaturesRow(BaseModel):
     Date: Union[str, dt_date]
     Close: float

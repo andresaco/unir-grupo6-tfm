@@ -62,9 +62,24 @@ social_daily_top_pipeline_job = define_asset_job(
     description="Extrae los 300 posts más importantes diarios, realiza NLP y agrega los datos por día de forma tolerante a fallos.",
 )
 
+# 3. Job específico para descargar y procesar los datos históricos de GDELT
+gdelt_download_job = define_asset_job(
+    name="download_gdelt",
+    selection=AssetSelection.assets(
+        "raw_gdelt_sentiment_data",
+        "processed_gdelt_sentiment_data",
+    ),
+    description="Ejecuta de manera secuencial la descarga y el procesamiento de los datos de sentimiento histórico de GDELT.",
+)
+
 
 # Definimos el repositorio global
 defs = Definitions(
     assets=all_assets,
-    jobs=[social_pipeline_job, market_download_job, social_daily_top_pipeline_job],
+    jobs=[
+        social_pipeline_job,
+        market_download_job,
+        social_daily_top_pipeline_job,
+        gdelt_download_job,
+    ],
 )

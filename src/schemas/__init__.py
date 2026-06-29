@@ -8,8 +8,9 @@ from .social import (
     SocialProcessedRow,
     SocialSentimentRow,
     SocialAggregatedRow,
+    GdeltSentimentRow,
 )
-from .features import GdeltSentimentRow, EngineeredFeaturesRow
+from .features import EngineeredFeaturesRow
 from .predictions import TradingSignalsRow
 
 
