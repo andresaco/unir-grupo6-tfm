@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
 from .stock import StockDownloadConfig  # Importar config compartida
+from ..schemas import validate_df, StockRawRow, GdeltSentimentRow, EngineeredFeaturesRow
 
 
 @asset(
@@ -18,13 +19,24 @@ def engineered_features(
 
     stock_path = f"data/01_raw/stock/{ticker}_{start_date}_{end_date}.csv"
     vix_path = f"data/01_raw/stock/VIX_{start_date}_{end_date}.csv"
-    sentiment_path = (
+    safe_name = str(config.name).lower().replace(" ", "_")
+    dynamic_sentiment_path = f"data/01_raw/sentiment/gdelt_{safe_name}_avanzado_{start_date}_a_{end_date}.csv"
+    fallback_sentiment_path = (
         "data/01_raw/sentiment/gdelt_apple_avanzado_2020-01-01_a_2026-12-31.csv"
+    )
+    sentiment_path = (
+        dynamic_sentiment_path
+        if os.path.exists(dynamic_sentiment_path)
+        else fallback_sentiment_path
     )
 
     context.log.info("Cargando datos crudos para Feature Engineering...")
     df_stock = pd.read_csv(stock_path)
     df_vix = pd.read_csv(vix_path)
+
+    # Validar al leer raw stock y vix
+    validate_df(df_stock, StockRawRow, stage="engineered_features (read stock raw)")
+    validate_df(df_vix, StockRawRow, stage="engineered_features (read vix raw)")
 
     df_stock["Date"] = pd.to_datetime(df_stock["Date"]).dt.date
     df_vix["Date"] = pd.to_datetime(df_vix["Date"]).dt.date
@@ -35,6 +47,12 @@ def engineered_features(
     if os.path.exists(sentiment_path):
         context.log.info(f"Incorporando datos de sentimiento desde {sentiment_path}")
         df_sent = pd.read_csv(sentiment_path)
+
+        # Validar al leer sentimiento GDELT
+        validate_df(
+            df_sent, GdeltSentimentRow, stage="engineered_features (read GDELT raw)"
+        )
+
         df_sent["Date"] = pd.to_datetime(df_sent["fecha"]).dt.date
         df_features = pd.merge(df_features, df_sent, on="Date", how="left")
 
@@ -63,6 +81,11 @@ def engineered_features(
     filas_antes = len(df_features)
     df_features.dropna(inplace=True)
     context.log.info(f"Filas limpiadas (NaNs): {filas_antes - len(df_features)}")
+
+    # Validar el dataset final de features antes de guardar
+    validate_df(
+        df_features, EngineeredFeaturesRow, stage="engineered_features (write features)"
+    )
 
     output_dir = "data/03_features"
     os.makedirs(output_dir, exist_ok=True)

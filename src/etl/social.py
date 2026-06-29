@@ -10,6 +10,7 @@ from .core.config import (
     StockDownloadConfig,
 )  # Configuración parametrizable para el pipeline social
 from .core.social.bsky import BlueskyClient  # Cliente de Bluesky del proyecto
+from ..schemas import validate_df, SocialRawRow, SocialProcessedRow, SocialSentimentRow
 
 # Cargar variables de entorno locales (.env)
 load_dotenv()
@@ -35,14 +36,14 @@ def raw_social_data(context: AssetExecutionContext, config: StockDownloadConfig)
     ticker = config.ticker
 
     context.log.info(
-        f"Iniciando extracción de datos de redes sociales para {config.query} ({start_date} a {end_date})..."
+        f"Iniciando extracción de datos de redes sociales para {config.query} ({start_date} a {end_date})...."
     )
 
     # 1. Inicializar DataFrame vacío
     df_posts = pd.DataFrame()
 
     try:
-        # Llamamos a tus módulos de scraping pasándoles los parámetros
+        # Simplificación de la lógica para el ejemplo:
         client = BlueskyClient()
         # Al ser search_posts asíncrono, lo envolvemos con asyncio.run para ejecutarlo síncronamente en Dagster
         posts = asyncio.run(client.search_posts(query=config.n, target_tweets=300))
@@ -79,6 +80,9 @@ def raw_social_data(context: AssetExecutionContext, config: StockDownloadConfig)
     # Aseguramos que df_posts sea un DataFrame válido de Pandas antes de continuar
     if not isinstance(df_posts, pd.DataFrame):
         df_posts = pd.DataFrame(df_posts)
+
+    # Validar datos crudos antes de escribir
+    validate_df(df_posts, SocialRawRow, stage="raw_social_data (write)")
 
     # 2. Persistir los datos crudos granulares (Bronze)
     output_dir = "data/01_raw/social"
@@ -126,6 +130,9 @@ def processed_social_data(context: AssetExecutionContext, raw_social_data: str) 
     context.log.info(f"Leyendo datos de redes sociales desde la capa Raw: {raw_path}")
     df = pd.read_csv(raw_path)
 
+    # Validar al leer raw
+    validate_df(df, SocialRawRow, stage="processed_social_data (read raw)")
+
     # 1. Normalización de Nombres de Columnas (Estandarización a snake_case)
     mapping_columnas = {
         "ID_Tweet": "tweet_id",
@@ -163,6 +170,9 @@ def processed_social_data(context: AssetExecutionContext, raw_social_data: str) 
     df["favoritos"] = df["favoritos"].fillna(0).astype(int)
     df["contenido_texto"] = df["contenido_texto"].astype(str)
 
+    # Validar procesado antes de escribir
+    validate_df(df, SocialProcessedRow, stage="processed_social_data (write processed)")
+
     # 3. Guardar estado intermedio limpio en un CSV temporal de procesamiento
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = "data/02_processed/social/temp"
@@ -197,6 +207,11 @@ def social_sentiment_analysis(
         f"Cargando publicaciones para realizar inferencia NLP de sentimiento desde {cleaned_path}..."
     )
     df = pd.read_csv(cleaned_path)
+
+    # Validar al leer procesado
+    validate_df(
+        df, SocialProcessedRow, stage="social_sentiment_analysis (read processed)"
+    )
 
     # Si por algún motivo el DataFrame resultante está vacío, resolvemos con esquema vacío seguro
     if df.empty:
@@ -265,6 +280,11 @@ def social_sentiment_analysis(
     # 5. Creación de las columnas de particionado basadas en la fecha
     df["fecha_utc"] = pd.to_datetime(
         df["fecha_utc"], format="ISO8601", errors="coerce", utc=True
+    )
+
+    # Validar sentiment final antes de escribir
+    validate_df(
+        df, SocialSentimentRow, stage="social_sentiment_analysis (write sentiment)"
     )
 
     # 6. Persistencia en Parquet particionado (Capa Silver Final)

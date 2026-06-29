@@ -8,6 +8,13 @@ from transformers import pipeline
 
 from .core.config import StockDownloadConfig
 from .core.social.bsky import BlueskyClient
+from ..schemas import (
+    validate_df,
+    SocialRawRow,
+    SocialProcessedRow,
+    SocialSentimentRow,
+    SocialAggregatedRow,
+)
 
 DEFAULT_MODEL = os.environ.get(
     "SENTIMENT_MODEL", "cardiffnlp/twitter-roberta-base-sentiment-latest"
@@ -81,6 +88,10 @@ def raw_daily_social_data(
                     )
 
                 df_daily = pd.DataFrame(daily_normalized_posts)
+                # Validar chunk antes de guardar
+                validate_df(
+                    df_daily, SocialRawRow, stage="raw_daily_social_data (write chunk)"
+                )
                 df_daily.to_csv(chunk_filepath, index=False)
                 context.log.info(
                     f"   Obtenidos y guardados {len(posts)} posts para {current_date.date()}."
@@ -89,7 +100,7 @@ def raw_daily_social_data(
                 context.log.warning(
                     f"   Sin resultados para el día {current_date.date()}."
                 )
-                pd.DataFrame(
+                df_empty = pd.DataFrame(
                     columns=[
                         "ID_Tweet",
                         "Fecha_UTC",
@@ -97,7 +108,13 @@ def raw_daily_social_data(
                         "Retweets",
                         "Favoritos",
                     ]
-                ).to_csv(chunk_filepath, index=False)
+                )
+                validate_df(
+                    df_empty,
+                    SocialRawRow,
+                    stage="raw_daily_social_data (write empty chunk)",
+                )
+                df_empty.to_csv(chunk_filepath, index=False)
 
         except Exception as e:
             context.log.error(
@@ -118,6 +135,11 @@ def raw_daily_social_data(
 
     df_final = pd.concat([pd.read_csv(f) for f in all_chunks], ignore_index=True)
     df_final = df_final.dropna(subset=["ID_Tweet"])
+
+    # Validar dataset consolidado antes de guardar
+    validate_df(
+        df_final, SocialRawRow, stage="raw_daily_social_data (write consolidated)"
+    )
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"daily_top_{safe_ticker}_{timestamp}.csv"
@@ -155,6 +177,9 @@ def processed_daily_social_data(
     context.log.info(f"Leyendo datos de redes sociales desde la capa Raw: {raw_path}")
     df = pd.read_csv(raw_path)
 
+    # Validar al leer raw consolidado
+    validate_df(df, SocialRawRow, stage="processed_daily_social_data (read raw)")
+
     # 1. Normalización
     mapping_columnas = {
         "ID_Tweet": "tweet_id",
@@ -186,6 +211,11 @@ def processed_daily_social_data(
     df["favoritos"] = df["favoritos"].fillna(0).astype(int)
     df["contenido_texto"] = df["contenido_texto"].astype(str)
 
+    # Validar procesado antes de guardar
+    validate_df(
+        df, SocialProcessedRow, stage="processed_daily_social_data (write processed)"
+    )
+
     # 3. Guardado
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = "data/02_processed/social_daily_top/temp"
@@ -216,6 +246,11 @@ def daily_social_sentiment_analysis(
         f"Cargando publicaciones para realizar inferencia NLP desde {cleaned_path}..."
     )
     df = pd.read_csv(cleaned_path)
+
+    # Validar al leer procesado
+    validate_df(
+        df, SocialProcessedRow, stage="daily_social_sentiment_analysis (read processed)"
+    )
 
     if df.empty:
         context.log.warning("Dataset vacío. Saltando cálculo NLP.")
@@ -263,6 +298,13 @@ def daily_social_sentiment_analysis(
         df["fecha_utc"], format="ISO8601", errors="coerce", utc=True
     )
 
+    # Validar antes de guardar
+    validate_df(
+        df,
+        SocialSentimentRow,
+        stage="daily_social_sentiment_analysis (write sentiment)",
+    )
+
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = "data/02_processed/social_daily_top/sentiment"
     filepath_cleaned = os.path.join(output_dir, f"social_sentiment_{timestamp}.csv")
@@ -295,7 +337,6 @@ def aggregated_daily_social_sentiment(
     Asset de agregación. Lee el resultado granular del análisis de sentimiento
     y calcula métricas resumidas por día, preparándolas para el Random Forest.
     """
-    # IMPORTANTE: Cambiada la ruta a social_daily_top para que coincida con el asset anterior
     input_dir = "data/02_processed/social_daily_top/sentiment"
 
     list_of_files = glob.glob(f"{input_dir}/*.csv")
@@ -308,6 +349,13 @@ def aggregated_daily_social_sentiment(
     context.log.info(f"Cargando dataset de sentimiento granular desde: {latest_file}")
 
     df = pd.read_csv(latest_file)
+
+    # Validar al leer sentiment
+    validate_df(
+        df,
+        SocialSentimentRow,
+        stage="aggregated_daily_social_sentiment (read sentiment)",
+    )
 
     if "fecha_limpia" not in df.columns or "puntuacion_sentimiento" not in df.columns:
         raise ValueError(
@@ -329,6 +377,13 @@ def aggregated_daily_social_sentiment(
     )
 
     agg_df["sentimiento_std"] = agg_df["sentimiento_std"].fillna(0.0)
+
+    # Validar agregación antes de guardar
+    validate_df(
+        agg_df,
+        SocialAggregatedRow,
+        stage="aggregated_daily_social_sentiment (write aggregated)",
+    )
 
     output_dir = "data/03_features/social_daily_top"
     os.makedirs(output_dir, exist_ok=True)

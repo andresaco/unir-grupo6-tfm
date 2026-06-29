@@ -4,6 +4,7 @@ import mlflow
 import mlflow.sklearn
 from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
 from datetime import datetime
+from ..schemas import validate_df, EngineeredFeaturesRow, TradingSignalsRow
 
 # Configuración del backend store de MLflow
 os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow.db"
@@ -30,6 +31,11 @@ def generate_trading_signals(context: AssetExecutionContext) -> MaterializeResul
 
     context.log.info(f"Cargando dataset de características desde {features_path}...")
     df = pd.read_csv(features_path)
+
+    # Validar features leídas
+    validate_df(
+        df, EngineeredFeaturesRow, stage="generate_trading_signals (read features)"
+    )
 
     # 1. Sincronizar fechas y ordenar de forma cronológica
     if "Date" in df.columns:
@@ -81,7 +87,7 @@ def generate_trading_signals(context: AssetExecutionContext) -> MaterializeResul
                 f"Detalle: {err}"
             )
 
-    # 5. Ejecución de la Inferencia sobre la ventana reducida (60 días)
+    # 5. Inferencia sobre la ventana reducida (60 días)
     context.log.info(
         f"Generando predicciones sobre las {len(X_inference)} observaciones de la ventana..."
     )
@@ -99,11 +105,19 @@ def generate_trading_signals(context: AssetExecutionContext) -> MaterializeResul
     results_df["confidence"] = probabilities
     results_df["execution_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    df_to_save = results_df.reset_index()
+    # Validar señales operativas antes de guardar
+    validate_df(
+        df_to_save,
+        TradingSignalsRow,
+        stage="generate_trading_signals (write predictions)",
+    )
+
     # 7. Almacenamiento local del artefacto
     output_dir = "data/04_predictions"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "latest_trading_signals.csv")
-    results_df.reset_index().to_csv(output_path, index=False)
+    df_to_save.to_csv(output_path, index=False)
 
     context.log.info(f"Señales operativas guardadas exitosamente en {output_path}")
 

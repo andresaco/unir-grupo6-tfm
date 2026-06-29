@@ -9,6 +9,7 @@ from dagster import (
 )
 
 from .core.config import StockDownloadConfig
+from ..schemas import validate_df, StockRawRow, StockProcessedRow
 
 
 @asset(
@@ -36,6 +37,9 @@ def raw_stock_data(
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
     df.reset_index(inplace=True)
+
+    # Validar antes de guardar
+    validate_df(df, StockRawRow, stage="raw_stock_data (write)")
 
     output_dir = "data/01_raw/stock"
     os.makedirs(output_dir, exist_ok=True)
@@ -79,6 +83,9 @@ def raw_vix_data(
         df_vix.columns = df_vix.columns.droplevel(1)
     df_vix.reset_index(inplace=True)
 
+    # Validar antes de guardar
+    validate_df(df_vix, StockRawRow, stage="raw_vix_data (write)")
+
     output_dir = "data/01_raw/stock"
     os.makedirs(output_dir, exist_ok=True)
     filepath = os.path.join(output_dir, f"VIX_{start_date}_{end_date}.csv")
@@ -119,8 +126,14 @@ def processed_stock_data(
     context.log.info(f"Cargando archivo raw de cotización desde {raw_path}...")
     df = pd.read_csv(raw_path)
 
+    # Validar al leer raw
+    validate_df(df, StockRawRow, stage="processed_stock_data (read raw)")
+
     # Transformación: renombrar columnas a minúsculas
     df.columns = [col.lower() for col in df.columns]
+
+    # Validar procesado antes de guardar
+    validate_df(df, StockProcessedRow, stage="processed_stock_data (write processed)")
 
     # Guardar en data/02_processed/stock/ con el mismo nombre que el archivo raw original
     output_dir = "data/02_processed/stock"
@@ -161,8 +174,14 @@ def processed_vix_data(
     context.log.info(f"Cargando archivo raw de VIX desde {raw_path}...")
     df_vix = pd.read_csv(raw_path)
 
+    # Validar al leer raw
+    validate_df(df_vix, StockRawRow, stage="processed_vix_data (read raw)")
+
     # Transformación: renombrar columnas a minúsculas
     df_vix.columns = [col.lower() for col in df_vix.columns]
+
+    # Validar procesado antes de guardar
+    validate_df(df_vix, StockProcessedRow, stage="processed_vix_data (write processed)")
 
     # Guardar en data/02_processed/stock/ con el mismo nombre que el archivo raw original
     output_dir = "data/02_processed/stock"

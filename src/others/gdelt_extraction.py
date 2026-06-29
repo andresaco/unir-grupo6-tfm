@@ -1,6 +1,16 @@
 import os
+import sys
 from google.cloud import bigquery
 import pandas as pd
+
+# Intento de importar validación y esquema
+try:
+    from ..schemas import validate_df, GdeltSentimentRow
+except ImportError, ValueError:
+    sys.path.append(
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    )
+    from src.schemas import validate_df, GdeltSentimentRow
 
 # 1. CONFIGURACIÓN DE CREDENCIALES
 # Coloca la ruta física a tu archivo JSON de credenciales de Google Cloud
@@ -98,6 +108,11 @@ def extraer_sentimiento_avanzado_rango(
         if not df.empty:
             # Asegurar formato de fecha en Pandas
             df["fecha"] = pd.to_datetime(df["fecha"])
+
+            # Validar antes de guardar
+            validate_df(
+                df, GdeltSentimentRow, stage="gdelt_extraction (write GDELT raw)"
+            )
 
             # Guardar el resultado enriquecido
             nombre_archivo = f"gdelt_apple_avanzado_{fecha_inicio}_a_{fecha_fin}.csv"

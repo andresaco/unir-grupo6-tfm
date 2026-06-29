@@ -6,7 +6,7 @@ from dagster import (
 )
 
 # Importamos nuestros módulos que contienen los assets
-from .etl import social, stock, feature_engineering, social_daily
+from .etl import social, stock, feature_engineering, social_daily, history
 from .training import train
 from .inference import predict
 
@@ -18,6 +18,7 @@ social_assets = load_assets_from_modules([social])
 social_daily_assets = load_assets_from_modules([social_daily])
 train_assets = load_assets_from_modules([train])
 inference_assets = load_assets_from_modules([predict])
+history_assets = load_assets_from_modules([history])
 
 # Combinamos todos los assets
 all_assets = (
@@ -27,6 +28,7 @@ all_assets = (
     + social_daily_assets
     + train_assets
     + inference_assets
+    + history_assets
 )
 
 # 1. Job para descargar datos de mercado coordinadamente (Stock + VIX)

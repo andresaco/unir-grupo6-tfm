@@ -5,6 +5,7 @@ import mlflow.sklearn
 from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score
+from ..schemas import validate_df, EngineeredFeaturesRow
 
 # Configuramos la ruta de MLflow para que guarde los experimentos en local
 os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow.db"
@@ -28,6 +29,11 @@ def financial_model_training(context: AssetExecutionContext) -> MaterializeResul
         )
 
     df = pd.read_csv(features_path)
+
+    # Validar features cargadas
+    validate_df(
+        df, EngineeredFeaturesRow, stage="financial_model_training (read features)"
+    )
 
     # Asumimos que la variable objetivo se llama 'target_direction' (1 = Sube, 0 = Baja)
     # y que la fecha es el índice o no debe usarse para predecir
