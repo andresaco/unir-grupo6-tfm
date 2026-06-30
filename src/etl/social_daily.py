@@ -1,11 +1,9 @@
 import os
 import datetime
 import asyncio
-import glob
 import pandas as pd
 from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
-from transformers import pipeline
-
+from dotenv import load_dotenv
 from .core.config import StockDownloadConfig
 from .core.social.bsky import BlueskyClient
 from ..schemas import (
@@ -15,6 +13,10 @@ from ..schemas import (
     SocialSentimentRow,
     SocialAggregatedRow,
 )
+
+load_dotenv()
+
+OUTPUT_DIR = "daily"
 
 DEFAULT_MODEL = os.environ.get(
     "SENTIMENT_MODEL", "cardiffnlp/twitter-roberta-base-sentiment-latest"
@@ -42,7 +44,7 @@ def raw_daily_social_data(
 
     client = BlueskyClient()
 
-    output_dir = "data/01_raw/social_daily_top"
+    output_dir = f"data/01_raw/{OUTPUT_DIR}"
     safe_ticker = str(config.ticker).replace(" ", "_")
     chunks_dir = os.path.join(output_dir, f"{safe_ticker}_chunks")
     os.makedirs(chunks_dir, exist_ok=True)
@@ -124,16 +126,23 @@ def raw_daily_social_data(
         current_date = next_date
 
     context.log.info(
-        "Consolidando todos los archivos diarios extraídos en un único dataset..."
+        "Consolidando archivos diarios en el rango solicitado en un único dataset..."
     )
-    all_chunks = glob.glob(f"{chunks_dir}/*.csv")
+    run_chunks = []
+    tmp_date = start_date
+    while tmp_date <= end_date:
+        chunk_filename = f"{tmp_date.strftime('%Y-%m-%d')}.csv"
+        chunk_filepath = os.path.join(chunks_dir, chunk_filename)
+        if os.path.exists(chunk_filepath):
+            run_chunks.append(chunk_filepath)
+        tmp_date = tmp_date + datetime.timedelta(days=1)
 
-    if not all_chunks:
+    if not run_chunks:
         raise ValueError(
             f"No se pudieron extraer datos para ningún día en el rango {config.initial_date} a {config.end_date}."
         )
 
-    df_final = pd.concat([pd.read_csv(f) for f in all_chunks], ignore_index=True)
+    df_final = pd.concat([pd.read_csv(f) for f in run_chunks], ignore_index=True)
     df_final = df_final.dropna(subset=["ID_Tweet"])
 
     # Validar dataset consolidado antes de guardar
@@ -152,7 +161,7 @@ def raw_daily_social_data(
         metadata={
             "filepath": MetadataValue.path(filepath),
             "total_records_extracted": MetadataValue.int(len(df_final)),
-            "days_processed": MetadataValue.int(len(all_chunks)),
+            "days_processed": MetadataValue.int(len(run_chunks)),
         }
     )
 
@@ -218,7 +227,7 @@ def processed_daily_social_data(
 
     # 3. Guardado
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = "data/02_processed/social_daily_top/temp"
+    output_dir = f"data/02_processed/{OUTPUT_DIR}/temp"
     os.makedirs(output_dir, exist_ok=True)
     filepath_cleaned = os.path.join(output_dir, f"social_cleaned_{timestamp}.csv")
     df.to_csv(filepath_cleaned, index=False)
@@ -233,7 +242,7 @@ def processed_daily_social_data(
 )
 def daily_social_sentiment_analysis(
     context: AssetExecutionContext, processed_daily_social_data: str
-) -> MaterializeResult:
+) -> str:
     """Análisis de sentimiento nativo para evitar dependencias cruzadas en el grafo."""
     cleaned_path = processed_daily_social_data
 
@@ -258,12 +267,26 @@ def daily_social_sentiment_analysis(
         df["puntuacion_sentimiento"] = pd.Series(dtype=float)
     else:
         context.log.info(f"Inicializando pipeline NLP: {DEFAULT_MODEL}")
+        import torch
+
+        device = (
+            0
+            if torch.cuda.is_available()
+            else ("mps" if torch.backends.mps.is_available() else -1)
+        )
+        if device == -1:
+            torch.set_num_threads(
+                1
+            )  # Optimizar hilos CPU y evitar competencia de hilos
+
+        from transformers import pipeline
+
         classifier = pipeline(
-            "sentiment-analysis", model=DEFAULT_MODEL, truncation=True, device=-1
+            "sentiment-analysis", model=DEFAULT_MODEL, truncation=True, device=device
         )
 
         texts = df["contenido_texto"].fillna("").astype(str).tolist()
-        results = classifier(texts, truncation=True, max_length=512)
+        results = classifier(texts, truncation=True, max_length=512, batch_size=16)
 
         df["sentimiento_label"] = [res["label"] for res in results]
         df["sentimiento_score"] = [res["score"] for res in results]
@@ -306,7 +329,7 @@ def daily_social_sentiment_analysis(
     )
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = "data/02_processed/social_daily_top/sentiment"
+    output_dir = f"data/02_processed/{OUTPUT_DIR}/sentiment"
     filepath_cleaned = os.path.join(output_dir, f"social_sentiment_{timestamp}.csv")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -316,7 +339,7 @@ def daily_social_sentiment_analysis(
         float(df["puntuacion_sentimiento"].mean()) if not df.empty else 0.5
     )
 
-    return MaterializeResult(
+    context.add_output_metadata(
         metadata={
             "fichero_procesado": MetadataValue.path(filepath_cleaned),
             "registros_analizados": MetadataValue.int(len(df)),
@@ -324,31 +347,32 @@ def daily_social_sentiment_analysis(
         }
     )
 
+    return filepath_cleaned
+
 
 @asset(
-    deps=[daily_social_sentiment_analysis],
     group_name="feature_engineering",
     description="Agrega el sentimiento diario (volumen, media, desviación estándar) para cruzar con datos financieros.",
 )
 def aggregated_daily_social_sentiment(
-    context: AssetExecutionContext,
+    context: AssetExecutionContext, daily_social_sentiment_analysis: str
 ) -> MaterializeResult:
     """
     Asset de agregación. Lee el resultado granular del análisis de sentimiento
     y calcula métricas resumidas por día, preparándolas para el Random Forest.
     """
-    input_dir = "data/02_processed/social_daily_top/sentiment"
+    sentiment_path = daily_social_sentiment_analysis
 
-    list_of_files = glob.glob(f"{input_dir}/*.csv")
-    if not list_of_files:
+    if not os.path.exists(sentiment_path):
         raise FileNotFoundError(
-            f"No se encontraron archivos de sentimiento en {input_dir}"
+            f"No se encontró el archivo de sentimiento granular en {sentiment_path}"
         )
 
-    latest_file = max(list_of_files, key=os.path.getctime)
-    context.log.info(f"Cargando dataset de sentimiento granular desde: {latest_file}")
+    context.log.info(
+        f"Cargando dataset de sentimiento granular desde: {sentiment_path}"
+    )
 
-    df = pd.read_csv(latest_file)
+    df = pd.read_csv(sentiment_path)
 
     # Validar al leer sentiment
     validate_df(
@@ -378,29 +402,57 @@ def aggregated_daily_social_sentiment(
 
     agg_df["sentimiento_std"] = agg_df["sentimiento_std"].fillna(0.0)
 
-    # Validar agregación antes de guardar
+    output_dir = f"data/03_features/{OUTPUT_DIR}"
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "daily_sentiment.csv")
+
+    if os.path.exists(output_path):
+        try:
+            existing_df = pd.read_csv(output_path)
+            # Combinar ambos datasets
+            combined_df = pd.concat([existing_df, agg_df], ignore_index=True)
+            # Asegurar tipo cadena para ordenación y deduplicación consistente
+            combined_df["fecha_limpia"] = combined_df["fecha_limpia"].astype(str)
+            # Eliminar duplicados manteniendo la versión más reciente (keep="last")
+            combined_df = combined_df.drop_duplicates(
+                subset=["fecha_limpia"], keep="last"
+            )
+            # Ordenar por fecha
+            combined_df = combined_df.sort_values(by="fecha_limpia").reset_index(
+                drop=True
+            )
+            agg_df_final = combined_df
+            context.log.info(
+                f"Se combinaron {len(agg_df)} registros nuevos con {len(existing_df)} registros existentes."
+            )
+        except Exception as e:
+            context.log.warning(
+                f"Error al combinar con el archivo existente {output_path}: {e}. Se sobrescribirá."
+            )
+            agg_df_final = agg_df
+    else:
+        agg_df["fecha_limpia"] = agg_df["fecha_limpia"].astype(str)
+        agg_df_final = agg_df.sort_values(by="fecha_limpia").reset_index(drop=True)
+
+    # Validar agregación final antes de guardar
     validate_df(
-        agg_df,
+        agg_df_final,
         SocialAggregatedRow,
         stage="aggregated_daily_social_sentiment (write aggregated)",
     )
 
-    output_dir = "data/03_features/social_daily_top"
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "daily_sentiment_aggregated.csv")
-
-    agg_df.to_csv(output_path, index=False)
-    context.log.info(f"Features sociales agregadas y guardadas en: {output_path}")
+    agg_df_final.to_csv(output_path, index=False)
+    context.log.info(f"Features sociales agregadas e incrementadas en: {output_path}")
 
     return MaterializeResult(
         metadata={
             "filepath": MetadataValue.path(output_path),
-            "total_dias_generados": MetadataValue.int(len(agg_df)),
+            "total_dias_generados": MetadataValue.int(len(agg_df_final)),
             "media_volumen_diario": MetadataValue.float(
-                float(agg_df["volumen_posts"].mean())
+                float(agg_df_final["volumen_posts"].mean())
             ),
             "sentimiento_medio_historico": MetadataValue.float(
-                float(agg_df["sentimiento_medio"].mean())
+                float(agg_df_final["sentimiento_medio"].mean())
             ),
         }
     )

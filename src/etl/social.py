@@ -4,7 +4,6 @@ import asyncio
 import pandas as pd
 from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
 from dotenv import load_dotenv
-from transformers import pipeline
 
 from .core.config import (
     StockDownloadConfig,
@@ -225,11 +224,25 @@ def social_sentiment_analysis(
         context.log.info(
             f"Inicializando el pipeline de Hugging Face con el modelo: {DEFAULT_MODEL}"
         )
+        import torch
+
+        device = (
+            0
+            if torch.cuda.is_available()
+            else ("mps" if torch.backends.mps.is_available() else -1)
+        )
+        if device == -1:
+            torch.set_num_threads(
+                1
+            )  # Optimizar hilos CPU y evitar competencia de hilos
+
+        from transformers import pipeline
+
         classifier = pipeline(
             "sentiment-analysis",
             model=DEFAULT_MODEL,
             truncation=True,
-            device=-1,  # Utilizar CPU de forma predeterminada y segura en entornos locales
+            device=device,
         )
 
         # 2. Preparar textos y ejecutar inferencia por lotes
@@ -237,7 +250,7 @@ def social_sentiment_analysis(
         context.log.info(
             f"Ejecutando inferencia de sentimiento para {len(df)} publicaciones..."
         )
-        results = classifier(texts, truncation=True, max_length=512)
+        results = classifier(texts, truncation=True, max_length=512, batch_size=16)
 
         # 3. Extraer etiquetas brutas
         df["sentimiento_label"] = [res["label"] for res in results]
