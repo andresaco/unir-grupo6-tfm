@@ -10,7 +10,7 @@ from ..schemas import validate_df, StockRawRow, GdeltSentimentRow, EngineeredFea
         "raw_stock_data",
         "raw_vix_data",
         "processed_gdelt_sentiment_data",
-    ],  # Asegura el orden de ejecución
+    ],
     group_name="feature_engineering",
     description="Une datos de cotización, VIX y sentimiento, y calcula indicadores técnicos.",
 )
@@ -21,8 +21,8 @@ def engineered_features(
     start_date = config.initial_date
     end_date = config.end_date
 
-    stock_path = f"data/01_raw/stock/{ticker}_{start_date}_{end_date}.csv"
-    vix_path = f"data/01_raw/stock/VIX_{start_date}_{end_date}.csv"
+    stock_path = f"data/03_features/stock/{ticker}.csv"
+    vix_path = f"data/03_features/vix/{ticker}.csv"
     safe_name = str(config.name).lower().replace(" ", "_")
     dynamic_sentiment_path = f"data/02_processed/sentiment/gdelt_{safe_name}_avanzado_{start_date}_a_{end_date}.csv"
     fallback_sentiment_path = (

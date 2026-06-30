@@ -35,9 +35,13 @@ all_assets = (
 market_download_job = define_asset_job(
     name="download_stock_and_vix_job",
     selection=AssetSelection.assets(
-        "raw_stock_data", "raw_vix_data", "processed_stock_data", "processed_vix_data"
+        "raw_stock_data",
+        "raw_vix_data",
+        "processed_stock_data",
+        "processed_vix_data",
+        "incremental_market_data",
     ),
-    description="Descarga de forma coordinada y paralela los datos de cotización histórica de acciones y del índice de volatilidad VIX.",
+    description="Descarga de forma coordinada y paralela los datos de cotización histórica de acciones y del índice de volatilidad VIX de forma incremental.",
 )
 
 # 1. Creamos el Job específico para el pipeline social

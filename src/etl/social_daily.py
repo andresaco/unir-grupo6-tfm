@@ -46,7 +46,30 @@ def raw_daily_social_data(
 
     output_dir = f"data/01_raw/{OUTPUT_DIR}"
     safe_ticker = str(config.ticker).replace(" ", "_")
-    chunks_dir = os.path.join(output_dir, f"{safe_ticker}_chunks")
+    start_date_str = config.initial_date.replace("-", "")
+    end_date_str = config.end_date.replace("-", "")
+    filename = f"daily_top_{safe_ticker}_{start_date_str}_{end_date_str}.csv"
+    filepath = os.path.join(output_dir, filename)
+
+    if os.path.exists(filepath):
+        context.log.info(
+            f"-> [Checkpoint] El archivo consolidado raw ya existe: {filepath}. Saltando extracción..."
+        )
+        try:
+            df_existing = pd.read_csv(filepath)
+            total_records = len(df_existing)
+        except Exception:
+            total_records = 0
+        context.add_output_metadata(
+            metadata={
+                "filepath": MetadataValue.path(filepath),
+                "total_records_extracted": MetadataValue.int(total_records),
+                "checkpoint_hit": MetadataValue.text("True"),
+            }
+        )
+        return filepath
+
+    chunks_dir = os.path.join(output_dir, f"{safe_ticker}")
     os.makedirs(chunks_dir, exist_ok=True)
 
     current_date = start_date
@@ -150,10 +173,6 @@ def raw_daily_social_data(
         df_final, SocialRawRow, stage="raw_daily_social_data (write consolidated)"
     )
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"daily_top_{safe_ticker}_{timestamp}.csv"
-    filepath = os.path.join(output_dir, filename)
-
     df_final.to_csv(filepath, index=False)
     context.log.info(f"Datos consolidados guardados exitosamente en: {filepath}")
 
@@ -183,56 +202,126 @@ def processed_daily_social_data(
             f"No se encontró el fichero Raw de redes sociales en: {raw_path}"
         )
 
-    context.log.info(f"Leyendo datos de redes sociales desde la capa Raw: {raw_path}")
-    df = pd.read_csv(raw_path)
+    # Analizar el nombre base para extraer parámetros
+    base_name = os.path.basename(raw_path)
+    parts = base_name.replace(".csv", "").split("_")
+    if len(parts) < 5:
+        raise ValueError(
+            f"El nombre del archivo raw '{base_name}' no cumple con el formato esperado."
+        )
 
-    # Validar al leer raw consolidado
-    validate_df(df, SocialRawRow, stage="processed_daily_social_data (read raw)")
+    start_date_str = parts[-2]
+    end_date_str = parts[-1]
+    safe_ticker = "_".join(parts[2:-2])
 
-    # 1. Normalización
-    mapping_columnas = {
-        "ID_Tweet": "tweet_id",
-        "Fecha_UTC": "fecha_utc",
-        "Contenido_Texto": "contenido_texto",
-        "Retweets": "retweets",
-        "Favoritos": "favoritos",
-    }
-    df = df.rename(columns=mapping_columnas)
+    start_date = datetime.datetime.strptime(start_date_str, "%Y%m%d")
+    end_date = datetime.datetime.strptime(end_date_str, "%Y%m%d")
 
-    columnas_esperadas = {
-        "tweet_id": "object",
-        "fecha_utc": "object",
-        "contenido_texto": "object",
-        "retweets": "int64",
-        "favoritos": "int64",
-    }
-    for col, dtype in columnas_esperadas.items():
-        if col not in df.columns:
-            df[col] = pd.Series(dtype=dtype)
+    # Directorios de entrada y salida de chunks
+    raw_chunks_dir = os.path.join(f"data/01_raw/{OUTPUT_DIR}", f"{safe_ticker}")
+    processed_chunks_dir = os.path.join(
+        f"data/02_processed/{OUTPUT_DIR}/temp", f"{safe_ticker}"
+    )
+    os.makedirs(processed_chunks_dir, exist_ok=True)
 
-    # 2. Data Quality
-    df = df.dropna(subset=["tweet_id", "fecha_utc", "contenido_texto"])
-    df["fecha_utc"] = pd.to_datetime(df["fecha_utc"], errors="coerce", utc=True)
-    df = df.dropna(subset=["fecha_utc"])
-    df["fecha_limpia"] = df["fecha_utc"].dt.date
+    processed_chunk_paths = []
 
-    df["retweets"] = df["retweets"].fillna(0).astype(int)
-    df["favoritos"] = df["favoritos"].fillna(0).astype(int)
-    df["contenido_texto"] = df["contenido_texto"].astype(str)
+    current_date = start_date
+    while current_date <= end_date:
+        date_str = current_date.strftime("%Y-%m-%d")
+        raw_chunk_path = os.path.join(raw_chunks_dir, f"{date_str}.csv")
+        processed_chunk_path = os.path.join(processed_chunks_dir, f"{date_str}.csv")
 
-    # Validar procesado antes de guardar
-    validate_df(
-        df, SocialProcessedRow, stage="processed_daily_social_data (write processed)"
+        if os.path.exists(raw_chunk_path):
+            if os.path.exists(processed_chunk_path):
+                context.log.info(
+                    f"-> [Checkpoint] Día {date_str} ya procesado estructuralmente. Saltando..."
+                )
+            else:
+                context.log.info(f"-> Procesando estructuralmente día {date_str}...")
+                df_chunk = pd.read_csv(raw_chunk_path)
+                validate_df(
+                    df_chunk,
+                    SocialRawRow,
+                    stage=f"processed_daily_social_data (read chunk {date_str})",
+                )
+
+                # 1. Normalización
+                mapping_columnas = {
+                    "ID_Tweet": "tweet_id",
+                    "Fecha_UTC": "fecha_utc",
+                    "Contenido_Texto": "contenido_texto",
+                    "Retweets": "retweets",
+                    "Favoritos": "favoritos",
+                }
+                df_chunk = df_chunk.rename(columns=mapping_columnas)
+
+                columnas_esperadas = {
+                    "tweet_id": "object",
+                    "fecha_utc": "object",
+                    "contenido_texto": "object",
+                    "retweets": "int64",
+                    "favoritos": "int64",
+                }
+                for col, dtype in columnas_esperadas.items():
+                    if col not in df_chunk.columns:
+                        df_chunk[col] = pd.Series(dtype=dtype)
+
+                # 2. Data Quality
+                df_chunk = df_chunk.dropna(
+                    subset=["tweet_id", "fecha_utc", "contenido_texto"]
+                )
+                df_chunk["fecha_utc"] = pd.to_datetime(
+                    df_chunk["fecha_utc"], errors="coerce", utc=True
+                )
+                df_chunk = df_chunk.dropna(subset=["fecha_utc"])
+                df_chunk["fecha_limpia"] = df_chunk["fecha_utc"].dt.date
+
+                df_chunk["retweets"] = df_chunk["retweets"].fillna(0).astype(int)
+                df_chunk["favoritos"] = df_chunk["favoritos"].fillna(0).astype(int)
+                df_chunk["contenido_texto"] = df_chunk["contenido_texto"].astype(str)
+
+                # Validar procesado antes de guardar
+                validate_df(
+                    df_chunk,
+                    SocialProcessedRow,
+                    stage=f"processed_daily_social_data (write chunk {date_str})",
+                )
+                df_chunk.to_csv(processed_chunk_path, index=False)
+
+            processed_chunk_paths.append(processed_chunk_path)
+        else:
+            context.log.warning(
+                f"No se encontró el chunk raw para el día {date_str} en: {raw_chunk_path}"
+            )
+
+        current_date = current_date + datetime.timedelta(days=1)
+
+    if not processed_chunk_paths:
+        raise ValueError(
+            f"No se procesaron chunks de datos para ningún día en el rango {start_date_str} a {end_date_str}."
+        )
+
+    # Consolidar todos los chunks procesados en un único archivo procesado final
+    context.log.info("Consolidando todos los chunks procesados...")
+    df_final = pd.concat(
+        [pd.read_csv(f) for f in processed_chunk_paths], ignore_index=True
     )
 
-    # 3. Guardado
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Validar consolidado final
+    validate_df(
+        df_final,
+        SocialProcessedRow,
+        stage="processed_daily_social_data (write consolidated processed)",
+    )
+
+    cleaned_filename = base_name.replace("daily_top_", "social_cleaned_")
     output_dir = f"data/02_processed/{OUTPUT_DIR}/temp"
     os.makedirs(output_dir, exist_ok=True)
-    filepath_cleaned = os.path.join(output_dir, f"social_cleaned_{timestamp}.csv")
-    df.to_csv(filepath_cleaned, index=False)
+    filepath_cleaned = os.path.join(output_dir, cleaned_filename)
+    df_final.to_csv(filepath_cleaned, index=False)
 
-    context.log.info(f"Datos limpios estructuralmente guardados en: {filepath_cleaned}")
+    context.log.info(f"Datos consolidados limpios guardados en: {filepath_cleaned}")
     return filepath_cleaned
 
 
@@ -242,7 +331,7 @@ def processed_daily_social_data(
 )
 def daily_social_sentiment_analysis(
     context: AssetExecutionContext, processed_daily_social_data: str
-) -> str:
+) -> pd.DataFrame:
     """Análisis de sentimiento nativo para evitar dependencias cruzadas en el grafo."""
     cleaned_path = processed_daily_social_data
 
@@ -251,103 +340,171 @@ def daily_social_sentiment_analysis(
             f"No se encontró el archivo base limpio en: {cleaned_path}"
         )
 
-    context.log.info(
-        f"Cargando publicaciones para realizar inferencia NLP desde {cleaned_path}..."
-    )
-    df = pd.read_csv(cleaned_path)
-
-    # Validar al leer procesado
-    validate_df(
-        df, SocialProcessedRow, stage="daily_social_sentiment_analysis (read processed)"
-    )
-
-    if df.empty:
-        context.log.warning("Dataset vacío. Saltando cálculo NLP.")
-        df["sentimiento"] = pd.Series(dtype=str)
-        df["puntuacion_sentimiento"] = pd.Series(dtype=float)
-    else:
-        context.log.info(f"Inicializando pipeline NLP: {DEFAULT_MODEL}")
-        import torch
-
-        device = (
-            0
-            if torch.cuda.is_available()
-            else ("mps" if torch.backends.mps.is_available() else -1)
-        )
-        if device == -1:
-            torch.set_num_threads(
-                1
-            )  # Optimizar hilos CPU y evitar competencia de hilos
-
-        from transformers import pipeline
-
-        classifier = pipeline(
-            "sentiment-analysis", model=DEFAULT_MODEL, truncation=True, device=device
+    # Analizar el nombre base para extraer parámetros
+    base_name = os.path.basename(cleaned_path)
+    parts = base_name.replace(".csv", "").split("_")
+    if len(parts) < 5:
+        raise ValueError(
+            f"El nombre del archivo procesado '{base_name}' no cumple con el formato esperado."
         )
 
-        texts = df["contenido_texto"].fillna("").astype(str).tolist()
-        results = classifier(texts, truncation=True, max_length=512, batch_size=16)
+    start_date_str = parts[-2]
+    end_date_str = parts[-1]
+    safe_ticker = "_".join(parts[2:-2])
 
-        df["sentimiento_label"] = [res["label"] for res in results]
-        df["sentimiento_score"] = [res["score"] for res in results]
+    start_date = datetime.datetime.strptime(start_date_str, "%Y%m%d")
+    end_date = datetime.datetime.strptime(end_date_str, "%Y%m%d")
 
-        puntuaciones_continuas = []
-        for label, score in zip(df["sentimiento_label"], df["sentimiento_score"]):
-            label_lower = label.lower()
-            if "pos" in label_lower or "label_2" in label_lower:
-                val = 0.5 + (score * 0.5)
-            elif "neg" in label_lower or "label_0" in label_lower:
-                val = 0.5 - (score * 0.5)
-            else:
-                val = 0.5
-            puntuaciones_continuas.append(round(val, 4))
+    # Directorios de entrada y salida de chunks
+    processed_chunks_dir = os.path.join(
+        f"data/02_processed/{OUTPUT_DIR}/temp", f"{safe_ticker}"
+    )
+    sentiment_chunks_dir = os.path.join(
+        f"data/02_processed/{OUTPUT_DIR}/sentiment", f"{safe_ticker}"
+    )
+    os.makedirs(sentiment_chunks_dir, exist_ok=True)
 
-        df["puntuacion_sentimiento"] = puntuaciones_continuas
-        df["sentimiento"] = df["sentimiento_label"].apply(
-            lambda labelled: (
-                "positive"
-                if "pos" in labelled.lower() or "label_2" in labelled.lower()
-                else (
-                    "negative"
-                    if "neg" in labelled.lower() or "label_0" in labelled.lower()
-                    else "neutral"
+    sentiment_chunk_paths = []
+    classifier = None
+
+    current_date = start_date
+    while current_date <= end_date:
+        date_str = current_date.strftime("%Y-%m-%d")
+        processed_chunk_path = os.path.join(processed_chunks_dir, f"{date_str}.csv")
+        sentiment_chunk_path = os.path.join(sentiment_chunks_dir, f"{date_str}.csv")
+
+        if os.path.exists(processed_chunk_path):
+            if os.path.exists(sentiment_chunk_path):
+                context.log.info(
+                    f"-> [Checkpoint] Sentimiento para el día {date_str} ya calculado. Saltando..."
                 )
+            else:
+                context.log.info(
+                    f"-> Calculando sentimiento NLP para día {date_str}..."
+                )
+                df_chunk = pd.read_csv(processed_chunk_path)
+                validate_df(
+                    df_chunk,
+                    SocialProcessedRow,
+                    stage=f"daily_social_sentiment_analysis (read chunk {date_str})",
+                )
+
+                if df_chunk.empty:
+                    context.log.warning(f"Día {date_str} vacío. Saltando cálculo NLP.")
+                    df_chunk["sentimiento"] = pd.Series(dtype=str)
+                    df_chunk["puntuacion_sentimiento"] = pd.Series(dtype=float)
+                else:
+                    if classifier is None:
+                        context.log.info(f"Inicializando pipeline NLP: {DEFAULT_MODEL}")
+                        import torch
+
+                        device = (
+                            0
+                            if torch.cuda.is_available()
+                            else ("mps" if torch.backends.mps.is_available() else -1)
+                        )
+                        if device == -1:
+                            torch.set_num_threads(1)
+
+                        from transformers import pipeline
+
+                        classifier = pipeline(
+                            "sentiment-analysis",
+                            model=DEFAULT_MODEL,
+                            truncation=True,
+                            device=device,
+                        )
+
+                    texts = df_chunk["contenido_texto"].fillna("").astype(str).tolist()
+                    results = classifier(
+                        texts, truncation=True, max_length=512, batch_size=16
+                    )
+
+                    df_chunk["sentimiento_label"] = [res["label"] for res in results]
+                    df_chunk["sentimiento_score"] = [res["score"] for res in results]
+
+                    puntuaciones_continuas = []
+                    for label, score in zip(
+                        df_chunk["sentimiento_label"], df_chunk["sentimiento_score"]
+                    ):
+                        label_lower = label.lower()
+                        if "pos" in label_lower or "label_2" in label_lower:
+                            val = 0.5 + (score * 0.5)
+                        elif "neg" in label_lower or "label_0" in label_lower:
+                            val = 0.5 - (score * 0.5)
+                        else:
+                            val = 0.5
+                        puntuaciones_continuas.append(round(val, 4))
+
+                    df_chunk["puntuacion_sentimiento"] = puntuaciones_continuas
+                    df_chunk["sentimiento"] = df_chunk["sentimiento_label"].apply(
+                        lambda labelled: (
+                            "positive"
+                            if "pos" in labelled.lower()
+                            or "label_2" in labelled.lower()
+                            else (
+                                "negative"
+                                if "neg" in labelled.lower()
+                                or "label_0" in labelled.lower()
+                                else "neutral"
+                            )
+                        )
+                    )
+
+                    df_chunk = df_chunk.drop(
+                        columns=["sentimiento_label", "sentimiento_score"]
+                    )
+
+                df_chunk["fecha_utc"] = pd.to_datetime(
+                    df_chunk["fecha_utc"], format="ISO8601", errors="coerce", utc=True
+                )
+
+                # Validar chunk de sentimiento antes de guardar
+                validate_df(
+                    df_chunk,
+                    SocialSentimentRow,
+                    stage=f"daily_social_sentiment_analysis (write chunk {date_str})",
+                )
+                df_chunk.to_csv(sentiment_chunk_path, index=False)
+
+            sentiment_chunk_paths.append(sentiment_chunk_path)
+        else:
+            context.log.warning(
+                f"No se encontró el chunk procesado para el día {date_str} en: {processed_chunk_path}"
             )
+
+        current_date = current_date + datetime.timedelta(days=1)
+
+    if not sentiment_chunk_paths:
+        raise ValueError(
+            f"No se analizaron sentimientos para ningún día en el rango {start_date_str} a {end_date_str}."
         )
 
-        df = df.drop(columns=["sentimiento_label", "sentimiento_score"])
-
-    df["fecha_utc"] = pd.to_datetime(
-        df["fecha_utc"], format="ISO8601", errors="coerce", utc=True
+    # Consolidar todos los chunks de sentimiento en un DataFrame único
+    context.log.info("Consolidando todos los chunks de sentimiento...")
+    df_final = pd.concat(
+        [pd.read_csv(f) for f in sentiment_chunk_paths], ignore_index=True
     )
 
-    # Validar antes de guardar
     validate_df(
-        df,
+        df_final,
         SocialSentimentRow,
-        stage="daily_social_sentiment_analysis (write sentiment)",
+        stage="daily_social_sentiment_analysis (consolidate sentiment)",
     )
-
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"data/02_processed/{OUTPUT_DIR}/sentiment"
-    filepath_cleaned = os.path.join(output_dir, f"social_sentiment_{timestamp}.csv")
-    os.makedirs(output_dir, exist_ok=True)
-
-    df.to_csv(filepath_cleaned, index=False)
 
     promedio_sentimiento = (
-        float(df["puntuacion_sentimiento"].mean()) if not df.empty else 0.5
+        float(df_final["puntuacion_sentimiento"].mean()) if not df_final.empty else 0.5
     )
 
     context.add_output_metadata(
         metadata={
-            "fichero_procesado": MetadataValue.path(filepath_cleaned),
-            "registros_analizados": MetadataValue.int(len(df)),
+            "directorio_chunks": MetadataValue.path(sentiment_chunks_dir),
+            "registros_analizados": MetadataValue.int(len(df_final)),
             "sentimiento_promedio_nlp": MetadataValue.float(promedio_sentimiento),
         }
     )
 
-    return filepath_cleaned
+    return df_final
 
 
 @asset(
@@ -355,24 +512,19 @@ def daily_social_sentiment_analysis(
     description="Agrega el sentimiento diario (volumen, media, desviación estándar) para cruzar con datos financieros.",
 )
 def aggregated_daily_social_sentiment(
-    context: AssetExecutionContext, daily_social_sentiment_analysis: str
+    context: AssetExecutionContext,
+    config: StockDownloadConfig,
+    daily_social_sentiment_analysis: pd.DataFrame,
 ) -> MaterializeResult:
     """
     Asset de agregación. Lee el resultado granular del análisis de sentimiento
     y calcula métricas resumidas por día, preparándolas para el Random Forest.
     """
-    sentiment_path = daily_social_sentiment_analysis
-
-    if not os.path.exists(sentiment_path):
-        raise FileNotFoundError(
-            f"No se encontró el archivo de sentimiento granular en {sentiment_path}"
-        )
+    df = daily_social_sentiment_analysis
 
     context.log.info(
-        f"Cargando dataset de sentimiento granular desde: {sentiment_path}"
+        "Cargando dataset de sentimiento granular desde el DataFrame en memoria..."
     )
-
-    df = pd.read_csv(sentiment_path)
 
     # Validar al leer sentiment
     validate_df(
@@ -404,7 +556,7 @@ def aggregated_daily_social_sentiment(
 
     output_dir = f"data/03_features/{OUTPUT_DIR}"
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "daily_sentiment.csv")
+    output_path = os.path.join(output_dir, f"{config.ticker}_sentiment.csv")
 
     if os.path.exists(output_path):
         try:
