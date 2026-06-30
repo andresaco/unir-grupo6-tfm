@@ -36,7 +36,7 @@ def raw_social_data(context: AssetExecutionContext, config: StockDownloadConfig)
     ticker = config.ticker
 
     context.log.info(
-        f"Iniciando extracción de datos de redes sociales para {config.query} ({start_date} a {end_date})...."
+        f"Iniciando extracción de datos de redes sociales para {config.name} ({start_date} a {end_date})...."
     )
 
     # 1. Inicializar DataFrame vacío
@@ -46,7 +46,7 @@ def raw_social_data(context: AssetExecutionContext, config: StockDownloadConfig)
         # Simplificación de la lógica para el ejemplo:
         client = BlueskyClient()
         # Al ser search_posts asíncrono, lo envolvemos con asyncio.run para ejecutarlo síncronamente en Dagster
-        posts = asyncio.run(client.search_posts(query=config.n, target_tweets=300))
+        posts = asyncio.run(client.search_posts(query=config.name, target_tweets=300))
 
         # Si la API de Bluesky no devuelve resultados, forzamos el uso del fallback estructurado
         if not posts or len(posts) == 0:
@@ -237,7 +237,7 @@ def social_sentiment_analysis(
         context.log.info(
             f"Ejecutando inferencia de sentimiento para {len(df)} publicaciones..."
         )
-        results = classifier(texts)
+        results = classifier(texts, truncation=True, max_length=512)
 
         # 3. Extraer etiquetas brutas
         df["sentimiento_label"] = [res["label"] for res in results]

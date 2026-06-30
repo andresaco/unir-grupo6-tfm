@@ -38,8 +38,13 @@ class BlueskyClient(SocialSearchClient):
         cursor = None
         remaining = target_tweets
 
-        # Utilizamos el sort_type dinámico para poder buscar los más importantes ("top")
-        base_params = {"q": query, "limit": min(target_tweets, 100), "sort": sort_type}
+        # Utilizamos el sort_type dinámico para poder buscar los más importantes ("top") y filtramos por idioma inglés ("en")
+        base_params = {
+            "q": query,
+            "limit": min(target_tweets, 100),
+            "sort": sort_type,
+            "lang": "en",
+        }
 
         while remaining > 0:
             response = self.client.app.bsky.feed.search_posts(

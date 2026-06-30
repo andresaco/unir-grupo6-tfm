@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import date as dt_date, datetime as dt_datetime
-from typing import Union
+from typing import Union, Optional
 
 
 class GdeltSentimentRow(BaseModel):
@@ -17,7 +17,7 @@ class GdeltSentimentRow(BaseModel):
 class SocialRawRow(BaseModel):
     ID_Tweet: str
     Fecha_UTC: Union[str, dt_datetime]
-    Contenido_Texto: str
+    Contenido_Texto: Optional[str] = ""
     Retweets: Union[int, str]
     Favoritos: Union[int, str]
 
@@ -25,7 +25,7 @@ class SocialRawRow(BaseModel):
 class SocialProcessedRow(BaseModel):
     tweet_id: str
     fecha_utc: Union[str, dt_datetime]
-    contenido_texto: str
+    contenido_texto: Optional[str] = ""
     retweets: int
     favoritos: int
     fecha_limpia: Union[str, dt_date]

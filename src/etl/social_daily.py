@@ -263,7 +263,7 @@ def daily_social_sentiment_analysis(
         )
 
         texts = df["contenido_texto"].fillna("").astype(str).tolist()
-        results = classifier(texts)
+        results = classifier(texts, truncation=True, max_length=512)
 
         df["sentimiento_label"] = [res["label"] for res in results]
         df["sentimiento_score"] = [res["score"] for res in results]
