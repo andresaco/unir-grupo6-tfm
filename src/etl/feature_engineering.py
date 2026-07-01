@@ -2,7 +2,15 @@ import os
 import pandas as pd
 from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
 from .stock import StockDownloadConfig  # Importar config compartida
-from ..schemas import validate_df, StockRawRow, GdeltSentimentRow, EngineeredFeaturesRow
+from ..schemas import (
+    validate_df,
+    StockProcessedRow,
+    GdeltSentimentRow,
+    EngineeredFeaturesRow,
+)
+
+
+OUTPUT_DIR = "features"
 
 
 @asset(
@@ -22,7 +30,7 @@ def engineered_features(
     end_date = config.end_date
 
     stock_path = f"data/03_features/stock/{ticker}.csv"
-    vix_path = f"data/03_features/vix/{ticker}.csv"
+    vix_path = "data/03_features/stock/VIX.csv"
     safe_name = str(config.name).lower().replace(" ", "_")
     dynamic_sentiment_path = f"data/02_processed/sentiment/gdelt_{safe_name}_avanzado_{start_date}_a_{end_date}.csv"
     fallback_sentiment_path = (
@@ -39,14 +47,16 @@ def engineered_features(
     df_vix = pd.read_csv(vix_path)
 
     # Validar al leer raw stock y vix
-    validate_df(df_stock, StockRawRow, stage="engineered_features (read stock raw)")
-    validate_df(df_vix, StockRawRow, stage="engineered_features (read vix raw)")
+    validate_df(
+        df_stock, StockProcessedRow, stage="engineered_features (read stock raw)"
+    )
+    validate_df(df_vix, StockProcessedRow, stage="engineered_features (read vix raw)")
 
-    df_stock["Date"] = pd.to_datetime(df_stock["Date"]).dt.date
-    df_vix["Date"] = pd.to_datetime(df_vix["Date"]).dt.date
+    df_stock["date"] = pd.to_datetime(df_stock["date"]).dt.date
+    df_vix["date"] = pd.to_datetime(df_vix["date"]).dt.date
 
-    df_vix = df_vix[["Date", "Close"]].rename(columns={"Close": "VIX_Close"})
-    df_features = pd.merge(df_stock, df_vix, on="Date", how="left")
+    df_vix = df_vix[["date", "close"]].rename(columns={"close": "VIX_close"})
+    df_features = pd.merge(df_stock, df_vix, on="date", how="left")
 
     if os.path.exists(sentiment_path):
         context.log.info(f"Incorporando datos de sentimiento desde {sentiment_path}")
@@ -57,8 +67,8 @@ def engineered_features(
             df_sent, GdeltSentimentRow, stage="engineered_features (read GDELT raw)"
         )
 
-        df_sent["Date"] = pd.to_datetime(df_sent["fecha"]).dt.date
-        df_features = pd.merge(df_features, df_sent, on="Date", how="left")
+        df_sent["date"] = pd.to_datetime(df_sent["fecha"]).dt.date
+        df_features = pd.merge(df_features, df_sent, on="date", how="left")
 
         if "sentiment_score" in df_features.columns:
             df_features["sentiment_score"] = df_features["sentiment_score"].fillna(0)
@@ -67,19 +77,20 @@ def engineered_features(
             f"No se encontró archivo de sentimiento en {sentiment_path}. Se omitirá."
         )
 
+    print(df_features.head(5))
     context.log.info("Calculando indicadores técnicos...")
-    df_features.sort_values("Date", inplace=True)
+    df_features.sort_values("date", inplace=True)
     df_features.reset_index(drop=True, inplace=True)
 
-    df_features["Daily_Return"] = df_features["Close"].pct_change()
-    df_features["SMA_10"] = df_features["Close"].rolling(window=10).mean()
-    df_features["SMA_50"] = df_features["Close"].rolling(window=50).mean()
-    df_features["Volatilidad_10d"] = (
-        df_features["Daily_Return"].rolling(window=10).std()
+    df_features["daily_return"] = df_features["close"].pct_change()
+    df_features["SMA_10"] = df_features["close"].rolling(window=10).mean()
+    df_features["SMA_50"] = df_features["close"].rolling(window=50).mean()
+    df_features["volatilidad_10d"] = (
+        df_features["daily_return"].rolling(window=10).std()
     )
 
     df_features["target_direction"] = (
-        df_features["Close"].shift(-1) > df_features["Close"]
+        df_features["close"].shift(-1) > df_features["close"]
     ).astype(int)
 
     filas_antes = len(df_features)
@@ -91,9 +102,9 @@ def engineered_features(
         df_features, EngineeredFeaturesRow, stage="engineered_features (write features)"
     )
 
-    output_dir = "data/03_features"
+    output_dir = f"data/03_features/{OUTPUT_DIR}/{ticker}"
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "historical_features.csv")
+    output_path = os.path.join(output_dir, "features.csv")
 
     df_features.to_csv(output_path, index=False)
 

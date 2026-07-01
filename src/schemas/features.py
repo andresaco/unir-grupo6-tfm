@@ -4,21 +4,20 @@ from typing import Optional, Union
 
 
 class EngineeredFeaturesRow(BaseModel):
-    Date: Union[str, dt_date]
-    Close: float
-    High: float
-    Low: float
-    Open: float
-    Volume: int
-    VIX_Close: float
-    Daily_Return: float
+    date: Union[str, dt_date]
+    close: float
+    high: float
+    low: float
+    open: float
+    volume: int
+    VIX_close: float
+    daily_return: float
     SMA_10: float
     SMA_50: float
-    Volatilidad_10d: float
+    volatilidad_10d: float
     target_direction: int
 
     # GDELT columns (can be optional / None if not present or NaN after left merge)
-    fecha: Optional[Union[str, dt_date]] = None
     volumen_noticias: Optional[float] = None
     sentimiento_promedio: Optional[float] = None
     puntuacion_positiva: Optional[float] = None
