@@ -2,7 +2,13 @@ import pandas as pd
 import os
 import mlflow
 import mlflow.sklearn
-from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
+from dagster import (
+    asset,
+    AssetExecutionContext,
+    MaterializeResult,
+    MetadataValue,
+    Config,
+)
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score
 from ..schemas import validate_df, EngineeredFeaturesRow
@@ -11,17 +17,40 @@ from ..schemas import validate_df, EngineeredFeaturesRow
 os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow.db"
 
 
+class TrainingConfig(Config):
+    """
+    Clase para parametrizar el entrenamiento del modelo.
+    Contiene el nombre de la ejecución/experimento, fechas para la criba de datos
+    e hiperparámetros de RandomForestClassifier para tuning.
+    """
+
+    name: str = "Apple"
+    ticker: str = "AAPL"
+    initial_date: str = "2023-12-01"  # Fecha de inicio para criba de datos
+    end_date: str = "2023-12-31"  # Fecha de fin para criba de datos
+
+    # Parámetros para hiperparameter tuning del RandomForestClassifier
+    n_estimators: int = 100
+    max_depth: int = 5
+    random_state: int = 42
+    class_weight: str = "balanced"
+
+
 @asset(
     group_name="training",
     description="Entrena el modelo financiero y registra los artefactos y métricas en MLflow.",
 )
-def financial_model_training(context: AssetExecutionContext) -> MaterializeResult:
+def financial_model_training(
+    context: AssetExecutionContext, config: TrainingConfig
+) -> MaterializeResult:
     """
-    Asset que lee las características preparadas, entrena un modelo predictivo
-    para la dirección del precio y lo registra en el Model Registry de MLflow.
+    Asset que lee las características preparadas, filtra por rango de fechas (criba),
+    entrena un modelo predictivo para la dirección del precio con los hiperparámetros
+    definidos en la configuración, y lo registra en el Model Registry de MLflow.
     """
+    ticker = config.ticker
     # 1. Cargar las features (Asumimos que un pipeline ETL previo las guardó aquí)
-    features_path = "data/03_features/historical_features.csv"
+    features_path = f"data/03_features/features/{ticker}/features.csv"
 
     if not os.path.exists(features_path):
         raise FileNotFoundError(
@@ -35,10 +64,17 @@ def financial_model_training(context: AssetExecutionContext) -> MaterializeResul
         df, EngineeredFeaturesRow, stage="financial_model_training (read features)"
     )
 
-    # Asumimos que la variable objetivo se llama 'target_direction' (1 = Sube, 0 = Baja)
-    # y que la fecha es el índice o no debe usarse para predecir
-    if "Date" in df.columns:
-        df = df.set_index("Date")
+    # Criba de datos basada en las fechas especificadas en la configuración
+    if "date" in df.columns:
+        df = df[(df["date"] >= config.initial_date) & (df["date"] <= config.end_date)]
+        df = df.set_index("date")
+    else:
+        df = df.loc[config.initial_date : config.end_date]
+
+    if df.empty:
+        raise ValueError(
+            f"El conjunto de datos filtrado entre {config.initial_date} y {config.end_date} está vacío."
+        )
 
     y = df["target_direction"]
     X = df.drop(columns=["target_direction"])
@@ -52,15 +88,15 @@ def financial_model_training(context: AssetExecutionContext) -> MaterializeResul
     y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
 
     # 2. Configurar MLflow
-    mlflow.set_experiment("Apple_Stock_Prediction")
+    mlflow.set_experiment(config.name)
 
     with mlflow.start_run(run_name="RandomForest_Ensemble") as run:
-        # Definir hiperparámetros
+        # Definir hiperparámetros dinámicamente desde el config
         params = {
-            "n_estimators": 100,
-            "max_depth": 5,
-            "random_state": 42,
-            "class_weight": "balanced",
+            "n_estimators": config.n_estimators,
+            "max_depth": config.max_depth,
+            "random_state": config.random_state,
+            "class_weight": config.class_weight,
         }
         mlflow.log_params(params)
 
@@ -88,7 +124,7 @@ def financial_model_training(context: AssetExecutionContext) -> MaterializeResul
         model_info = mlflow.sklearn.log_model(
             sk_model=model,
             artifact_path="random_forest_model",
-            registered_model_name="Apple_Trading_Model",
+            registered_model_name=f"{config.name}_Trading_Model",
         )
 
         model_uri = model_info.model_uri

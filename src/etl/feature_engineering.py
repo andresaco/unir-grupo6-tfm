@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
-from .stock import StockDownloadConfig  # Importar config compartida
+from .core.config import StockDownloadConfig
 from ..schemas import (
     validate_df,
     StockProcessedRow,
