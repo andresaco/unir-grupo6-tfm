@@ -8,7 +8,7 @@ from dagster import (
 # Importamos nuestros módulos que contienen los assets
 from .etl import social, stock, feature_engineering, social_daily, history
 from .training import rf_train, xgboost_train, lstm_train
-from .inference import predict
+from .inference import predict, backtesting
 
 
 # Cargamos los assets de cada módulo
@@ -17,7 +17,7 @@ feateng_assets = load_assets_from_modules([feature_engineering])
 social_assets = load_assets_from_modules([social])
 social_daily_assets = load_assets_from_modules([social_daily])
 train_assets = load_assets_from_modules([rf_train, xgboost_train, lstm_train])
-inference_assets = load_assets_from_modules([predict])
+inference_assets = load_assets_from_modules([predict, backtesting])
 history_assets = load_assets_from_modules([history])
 
 # Combinamos todos los assets
@@ -77,6 +77,14 @@ gdelt_download_job = define_asset_job(
 )
 
 
+# Job específico para ejecutar el backtesting comparativo de todos los modelos
+backtest_pipeline_job = define_asset_job(
+    name="run_backtest_pipeline",
+    selection=AssetSelection.assets("run_backtest"),
+    description="Ejecuta la evaluación histórica comparativa sobre todos los modelos de Machine Learning registrados en MLflow.",
+)
+
+
 # Definimos el repositorio global
 defs = Definitions(
     assets=all_assets,
@@ -85,5 +93,6 @@ defs = Definitions(
         market_download_job,
         social_daily_top_pipeline_job,
         gdelt_download_job,
+        backtest_pipeline_job,
     ],
 )
