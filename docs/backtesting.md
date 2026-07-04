@@ -84,7 +84,7 @@ Al terminar la ejecución del job, haz clic en el asset `run_backtest` dentro de
 | **Apple_LSTM_Model** | -2.30% | 12.10% | -0.10 | -15.40% | -0.15 | 8 | 40.0% |
 
 ### **2. Archivo de Comparación Local (`runtime/backtest_comparison.csv`)**
-Cada ejecución del backtesting añade una fila con el resumen a [runtime/backtest_comparison.csv](file:///home/josandres/Development/unir-grupo6-tfm/runtime/backtest_comparison.csv).
+Cada ejecución del backtesting añade una fila con el resumen a [runtime/backtest_comparison.csv](runtime/backtest_comparison.csv).
 Este archivo te permite mantener un histórico persistente de todas las pruebas realizadas para todos los modelos y períodos.
 
 ### **3. MLflow UI (Gráficos comparativos)**
@@ -98,4 +98,4 @@ Navega a [http://127.0.0.1:5000](http://127.0.0.1:5000). Tendrás los resultados
 
 ### **4. Detalle Diario del Backtest (`data/05_backtests/`)**
 Si deseas graficar las curvas de equidad detalladas de cada modelo o analizar sus señales diarias, el pipeline genera un archivo CSV completo para cada modelo en:
-`data/05_backtests/{ticker}_{model_name}_backtest.csv` (ej. [AAPL_Apple_XGBoost_Model_backtest.csv](file:///home/josandres/Development/unir-grupo6-tfm/data/05_backtests/AAPL_Apple_XGBoost_Model_backtest.csv)).
+`data/05_backtests/{ticker}_{model_name}_backtest.csv` (ej. [AAPL_Apple_XGBoost_Model_backtest.csv](data/05_backtests/AAPL_Apple_XGBoost_Model_backtest.csv)).
