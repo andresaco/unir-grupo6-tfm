@@ -355,6 +355,40 @@ def daily_social_sentiment_analysis(
     start_date = datetime.datetime.strptime(start_date_str, "%Y%m%d")
     end_date = datetime.datetime.strptime(end_date_str, "%Y%m%d")
 
+    sentiment_dir = f"data/02_processed/{OUTPUT_DIR}/sentiment"
+    os.makedirs(sentiment_dir, exist_ok=True)
+    consolidated_sentiment_filename = (
+        f"social_sentiment_{safe_ticker}_{start_date_str}_{end_date_str}.csv"
+    )
+    consolidated_sentiment_path = os.path.join(
+        sentiment_dir, consolidated_sentiment_filename
+    )
+
+    if os.path.exists(consolidated_sentiment_path):
+        context.log.info(
+            f"-> [Checkpoint] El archivo consolidado de sentimiento ya existe: {consolidated_sentiment_path}. Saltando análisis NLP..."
+        )
+        df_final = pd.read_csv(consolidated_sentiment_path)
+        df_final["fecha_utc"] = pd.to_datetime(
+            df_final["fecha_utc"], errors="coerce", utc=True
+        )
+        promedio_sentimiento = (
+            float(df_final["puntuacion_sentimiento"].mean())
+            if not df_final.empty
+            else 0.5
+        )
+        context.add_output_metadata(
+            metadata={
+                "consolidated_sentiment_path": MetadataValue.path(
+                    consolidated_sentiment_path
+                ),
+                "registros_analizados": MetadataValue.int(len(df_final)),
+                "sentimiento_promedio_nlp": MetadataValue.float(promedio_sentimiento),
+                "checkpoint_hit": MetadataValue.text("True"),
+            }
+        )
+        return df_final
+
     # Directorios de entrada y salida de chunks
     processed_chunks_dir = os.path.join(
         f"data/02_processed/{OUTPUT_DIR}/temp", f"{safe_ticker}"
@@ -496,11 +530,20 @@ def daily_social_sentiment_analysis(
         float(df_final["puntuacion_sentimiento"].mean()) if not df_final.empty else 0.5
     )
 
+    df_final.to_csv(consolidated_sentiment_path, index=False)
+    context.log.info(
+        f"Datos consolidados de sentimiento guardados en: {consolidated_sentiment_path}"
+    )
+
     context.add_output_metadata(
         metadata={
             "directorio_chunks": MetadataValue.path(sentiment_chunks_dir),
+            "consolidated_sentiment_path": MetadataValue.path(
+                consolidated_sentiment_path
+            ),
             "registros_analizados": MetadataValue.int(len(df_final)),
             "sentimiento_promedio_nlp": MetadataValue.float(promedio_sentimiento),
+            "checkpoint_hit": MetadataValue.text("False"),
         }
     )
 

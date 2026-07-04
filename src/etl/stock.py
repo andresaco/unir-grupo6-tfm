@@ -30,7 +30,14 @@ def raw_stock_data(
         f"Iniciando descarga de datos para {ticker} desde {start_date} hasta {end_date}..."
     )
 
-    df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+    download_end = end_date
+    if start_date == end_date:
+        from datetime import datetime, timedelta
+
+        dt = datetime.strptime(start_date, "%Y-%m-%d")
+        download_end = (dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    df = yf.download(ticker, start=start_date, end=download_end, progress=False)
 
     if df.empty:
         raise ValueError(
@@ -75,7 +82,14 @@ def raw_vix_data(
         f"Iniciando descarga de datos para {ticker_vix} desde {start_date} hasta {end_date}..."
     )
 
-    df_vix = yf.download(ticker_vix, start=start_date, end=end_date, progress=False)
+    download_end = end_date
+    if start_date == end_date:
+        from datetime import datetime, timedelta
+
+        dt = datetime.strptime(start_date, "%Y-%m-%d")
+        download_end = (dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    df_vix = yf.download(ticker_vix, start=start_date, end=download_end, progress=False)
 
     if df_vix.empty:
         raise ValueError(
