@@ -3,6 +3,8 @@ from dagster import (
     load_assets_from_modules,
     define_asset_job,
     AssetSelection,
+    schedule,
+    RunConfig,
 )
 
 # Importamos nuestros módulos que contienen los assets
@@ -77,12 +79,68 @@ gdelt_download_job = define_asset_job(
 )
 
 
-# Job específico para ejecutar el backtesting comparativo de todos los modelos
+# Job específico para ejecutar el backtesting de todos los modelos
 backtest_pipeline_job = define_asset_job(
     name="run_backtest_pipeline",
     selection=AssetSelection.assets("run_backtest"),
     description="Ejecuta la evaluación histórica comparativa sobre todos los modelos de Machine Learning registrados en MLflow.",
 )
+
+
+# Job para el pipeline de producción diario que integra mercado, redes sociales y predicción
+daily_production_pipeline_job = define_asset_job(
+    name="daily_production_pipeline",
+    selection=AssetSelection.assets(
+        "raw_stock_data",
+        "raw_vix_data",
+        "processed_stock_data",
+        "processed_vix_data",
+        "incremental_market_data",
+        "raw_daily_social_data",
+        "processed_daily_social_data",
+        "daily_social_sentiment_analysis",
+        "aggregated_daily_social_sentiment",
+        "daily_prediction",
+    ),
+    description="Ejecuta el pipeline de producción diario: descarga datos de mercado, descarga y analiza sentimientos de Bluesky, selecciona el mejor modelo de MLflow y genera predicciones.",
+)
+
+
+@schedule(
+    cron_schedule="0 23 * * 1-5",  # De lunes a viernes a las 23:00 (cierre de mercado)
+    job=daily_production_pipeline_job,
+    name="daily_production_pipeline_schedule",
+    description="Ejecuta diariamente el pipeline de producción para AAPL con la fecha actual.",
+)
+def daily_production_pipeline_schedule(context):
+    """
+    Planificación diaria para el pipeline de producción. Genera la predicción
+    para el día de hoy pasando la fecha actual como parámetro de configuración.
+    """
+    import datetime
+
+    # Obtenemos la fecha actual en formato YYYY-MM-DD
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+
+    config_dict = {
+        "ticker": "AAPL",
+        "name": "Apple",
+        "initial_date": today_str,
+        "end_date": today_str,
+    }
+
+    return RunConfig(
+        ops={
+            "raw_stock_data": {"config": config_dict},
+            "raw_vix_data": {"config": config_dict},
+            "processed_stock_data": {"config": config_dict},
+            "processed_vix_data": {"config": config_dict},
+            "incremental_market_data": {"config": config_dict},
+            "raw_daily_social_data": {"config": config_dict},
+            "aggregated_daily_social_sentiment": {"config": config_dict},
+            "daily_prediction": {"config": config_dict},
+        }
+    )
 
 
 # Definimos el repositorio global
@@ -94,5 +152,9 @@ defs = Definitions(
         social_daily_top_pipeline_job,
         gdelt_download_job,
         backtest_pipeline_job,
+        daily_production_pipeline_job,
+    ],
+    schedules=[
+        daily_production_pipeline_schedule,
     ],
 )
