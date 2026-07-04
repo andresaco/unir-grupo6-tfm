@@ -7,15 +7,41 @@ requires-python = ">=3.14"
 dependencies = [
     "atproto>=0.0.68",
     "dagster>=1.13.9",
+    "dagster-webserver>=1.13.9",
+    "db-dtypes>=1.7.0",
     "dotenv>=0.9.9",
-    "mlflow>=1.27.0",
-    "pandas>=3.0.3",
+    "google-cloud-bigquery>=3.42.1",
+    "imblearn>=0.0",
+    "jupyterlab>=4.6.1",
+    "mlflow>3.0.0",
+    "pandas<3.0.0",
     "playwright>=1.60.0",
+    "scikit-learn>=1.9.0",
+    "seaborn>=0.13.2",
+    "shap>=0.52.0",
+    "torch>=2.12.0",
     "transformers>=5.12.1",
+    "xgboost>=3.3.0",
+    "yfinance>=1.4.1",
 ]
+
+[project.scripts]
+dagster-dev = "src.utils.cli:launch_dagster"
+mlflow-ui = "src.utils.cli:launch_mlflow"
+jupyterlab = "src.utils.cli:launch_jupyter"
 
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.0",
     "ruff>=0.15.17",
 ]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
