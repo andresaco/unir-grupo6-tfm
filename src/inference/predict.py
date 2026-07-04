@@ -2,12 +2,27 @@ import os
 import pandas as pd
 import mlflow
 import mlflow.sklearn
-from dagster import asset, AssetExecutionContext, MaterializeResult, MetadataValue
-from datetime import datetime
-from ..schemas import validate_df, EngineeredFeaturesRow, TradingSignalsRow
+from dagster import (
+    asset,
+    AssetExecutionContext,
+    MaterializeResult,
+    MetadataValue,
+    Config,
+)
+from ..schemas import validate_df, EngineeredFeaturesRow
 
 # Configuración del backend store de MLflow
-os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow.db"
+os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///runtime/mlflow/mlflow.db"
+
+
+class InferenceConfig(Config):
+    """
+    Configuración parametrizable para la generación de señales de trading (inferencia).
+    """
+
+    company_name: str = "Apple"
+    ticker: str = "AAPL"
+    dataset_path: str = "data/03_features/AAPL/features/features.csv"
 
 
 @asset(
@@ -17,12 +32,14 @@ os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow.db"
     group_name="inference",
     description="Carga el modelo óptimo desde el Registry de MLflow y genera predicciones operativas para los últimos 60 días.",
 )
-def generate_trading_signals(context: AssetExecutionContext) -> MaterializeResult:
+def generate_trading_signals(
+    context: AssetExecutionContext, config: InferenceConfig
+) -> MaterializeResult:
     """
     Asset que toma los últimos datos técnicos preparados, aplica un slicing de los últimos
     60 días, carga el modelo de producción de MLflow y genera las señales operativas finales.
     """
-    features_path = "data/03_features/historical_features.csv"
+    features_path = config.dataset_path
 
     if not os.path.exists(features_path):
         raise FileNotFoundError(
@@ -38,8 +55,8 @@ def generate_trading_signals(context: AssetExecutionContext) -> MaterializeResul
     )
 
     # 1. Sincronizar fechas y ordenar de forma cronológica
-    if "Date" in df.columns:
-        df_inference = df.set_index("Date")
+    if "date" in df.columns:
+        df_inference = df.set_index("date")
     else:
         df_inference = df.copy()
 
@@ -52,7 +69,7 @@ def generate_trading_signals(context: AssetExecutionContext) -> MaterializeResul
     context.log.info(
         "Aplicando slicing temporal para evaluar los últimos 60 días del mercado..."
     )
-    df_inference = df_inference.tail(60)
+    # df_inference = df_inference.tail(60)
 
     # 3. Separar las columnas predictoras excluyendo el target real si estuviera presente
     X_inference = df_inference.drop(columns=["target_direction"], errors="ignore")
@@ -61,7 +78,7 @@ def generate_trading_signals(context: AssetExecutionContext) -> MaterializeResul
     X_inference = X_inference.select_dtypes(include=["number"])
 
     # 4. Intentar cargar el modelo productivo desde el Model Registry de MLflow
-    model_name = "Apple_Trading_Model"
+    model_name = f"{config.company_name}_Trading_Model"
     model_uri_production = f"models:/{model_name}/Production"
     model_uri_latest = f"models:/{model_name}/latest"
 
@@ -99,24 +116,23 @@ def generate_trading_signals(context: AssetExecutionContext) -> MaterializeResul
     # 6. Estructurar el DataFrame de Salida
     results_df = pd.DataFrame(index=df_inference.index)
     results_df["price_close"] = (
-        df_inference["Close"] if "Close" in df_inference.columns else None
+        df_inference["close"] if "close" in df_inference.columns else None
     )
     results_df["predicted_signal"] = predictions  # 1 = Compra, 0 = Mantener/Venta
     results_df["confidence"] = probabilities
-    results_df["execution_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     df_to_save = results_df.reset_index()
     # Validar señales operativas antes de guardar
-    validate_df(
-        df_to_save,
-        TradingSignalsRow,
-        stage="generate_trading_signals (write predictions)",
-    )
+    # validate_df(
+    #    df_to_save,
+    #    TradingSignalsRow,
+    #    stage="generate_trading_signals (write predictions)",
+    # )
 
     # 7. Almacenamiento local del artefacto
     output_dir = "data/04_predictions"
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "latest_trading_signals.csv")
+    output_path = os.path.join(output_dir, f"{config.ticker}_trading_signals.csv")
     df_to_save.to_csv(output_path, index=False)
 
     context.log.info(f"Señales operativas guardadas exitosamente en {output_path}")

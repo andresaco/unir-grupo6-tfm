@@ -203,6 +203,38 @@ def processed_vix_data(
     )
 
 
+def calculate_rsi(data, window=14):
+    """
+    Calculates the Relative Strength Index (RSI) for the given financial data.
+
+    The RSI is a momentum indicator that measures the speed and change of price movements.
+
+    Args:
+        data (pd.DataFrame): DataFrame containing 'Close' prices.
+        window (int, optional): The look-back period for RSI calculation. Defaults to 14.
+
+    Returns:
+        pd.Series: A Series containing the RSI values.
+    """
+    # Calcular los cambios diarios de precio
+    delta = data["close"].diff()
+
+    # Separar ganancias (gains) y pérdidas (losses)
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+
+    # Calcular el promedio de ganancias y pérdidas durante la ventana
+    avg_gain = gain.rolling(window=window, min_periods=1).mean()
+    avg_loss = loss.rolling(window=window, min_periods=1).mean()
+
+    # Calcular Relative Strength (RS)
+    rs = avg_gain / avg_loss
+
+    # Calcular Relative Strength Index (RSI)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+
 @asset(
     deps=[processed_stock_data, processed_vix_data],
     group_name="feature_engineering",
@@ -265,6 +297,21 @@ def incremental_market_data(
     df_stock_combined["date"] = df_stock_combined["date"].astype(str)
     df_stock_combined = df_stock_combined.drop_duplicates(subset=["date"], keep="last")
     df_stock_combined = df_stock_combined.sort_values(by="date").reset_index(drop=True)
+
+    # Calcular el RSI sobre df_stock_combined y asignarlo a una nueva columna RSI
+    df_stock_combined["RSI"] = calculate_rsi(df_stock_combined)
+
+    # Calcular retornos diarios, SMA y volatilidad sobre df_stock_combined
+    df_stock_combined["daily_return"] = df_stock_combined["close"].pct_change()
+    df_stock_combined["SMA_10"] = df_stock_combined["close"].rolling(window=10).mean()
+    df_stock_combined["SMA_50"] = df_stock_combined["close"].rolling(window=50).mean()
+    df_stock_combined["volatilidad_10d"] = (
+        df_stock_combined["daily_return"].rolling(window=10).std()
+    )
+    df_stock_combined["target_direction"] = (
+        df_stock_combined["close"].shift(-1) > df_stock_combined["close"]
+    ).astype(int)
+
     df_stock_combined.to_csv(stock_output_path, index=False)
 
     # Procesar VIX

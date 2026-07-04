@@ -14,7 +14,7 @@ from sklearn.metrics import accuracy_score, precision_score
 from ..schemas import validate_df, EngineeredFeaturesRow
 
 # Configuramos la ruta de MLflow para que guarde los experimentos en local
-os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow.db"
+os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///runtime/mlflow/mlflow.db"
 
 
 class TrainingConfig(Config):
@@ -88,7 +88,16 @@ def financial_model_training(
     y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
 
     # 2. Configurar MLflow
-    mlflow.set_experiment(config.name)
+    experiment_name = config.name
+    try:
+        # Se crea con artifact_location explícito para que no se cree en la raíz
+        mlflow.create_experiment(
+            name=experiment_name,
+            artifact_location=os.path.abspath("runtime/mlflow/mlruns"),
+        )
+    except Exception:
+        pass
+    mlflow.set_experiment(experiment_name)
 
     with mlflow.start_run(run_name="RandomForest_Ensemble") as run:
         # Definir hiperparámetros dinámicamente desde el config
@@ -129,6 +138,23 @@ def financial_model_training(
 
         model_uri = model_info.model_uri
         context.log.info(f"Modelo registrado exitosamente con URI: {model_uri}")
+
+        # 6. Evaluar el modelo con MLflow y calcular SHAP
+        eval_data = X_test.copy()
+        eval_data["target_direction"] = y_test
+
+        context.log.info(
+            "Iniciando la evaluación de Random Forest con MLflow y cálculo de SHAP..."
+        )
+        mlflow.models.evaluate(
+            model=model_uri,
+            data=eval_data,
+            targets="target_direction",
+            model_type="classifier",
+            evaluator_config={
+                "log_explainer": True,
+            },
+        )
 
     # Devolver metadata a la interfaz de Dagster para trazabilidad
     return MaterializeResult(

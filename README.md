@@ -53,10 +53,10 @@ Este documento describe cómo lanzar los diferentes flujos de trabajo (pipelines
 
 El punto de entrada centralizado de nuestro proyecto es el archivo src/definitions.py. Para visualizar y ejecutar los pipelines, primero debemos levantar el servidor local de Dagster.
 
-Asegúrate de estar en la raíz de tu proyecto y ejecuta el siguiente comando activando tu entorno virtual:
+Asegúrate de estar en la raíz de tu proyecto y ejecuta el siguiente comando (que configura automáticamente la persistencia de datos en `runtime/dagster`):
 
 ```bash
-uv run dagster dev -m src.definitions
+uv run dagster-dev
 ```
 
 Esto levantará una interfaz web accesible desde tu navegador en **http://127.0.0.1:3000**.
@@ -145,10 +145,10 @@ uv run run_custom_pipeline.py
 
 Una vez que el pipeline finaliza con éxito y el asset financial_model_training reporta el estado Success, el modelo y sus métricas quedan guardados.
 
-Para consultar el registro de experimentos, levanta la interfaz de MLflow en una nueva terminal (asegurándote de apuntar a la misma base de datos mlflow.db generada en la raíz del proyecto):
+Para consultar el registro de experimentos, levanta la interfaz de MLflow (que cargará automáticamente los experimentos y modelos guardados en `runtime/mlflow`):
 
 ```bash
-uv run mlflow ui --backend-store-uri sqlite:///mlflow.db
+uv run mlflow-ui
 ```
 
 Entra en **http://127.0.0.1:5000**, busca el experimento Apple_Stock_Prediction y podrás ver todas las métricas de Accuracy, Precision y descargar el artefacto .pkl validado.

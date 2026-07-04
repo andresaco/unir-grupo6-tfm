@@ -8,6 +8,7 @@ from ..schemas import (
     GdeltSentimentRow,
     EngineeredFeaturesRow,
 )
+import numpy as np
 
 
 OUTPUT_DIR = "features"
@@ -55,7 +56,7 @@ def engineered_features(
     df_stock["date"] = pd.to_datetime(df_stock["date"]).dt.date
     df_vix["date"] = pd.to_datetime(df_vix["date"]).dt.date
 
-    df_vix = df_vix[["date", "close"]].rename(columns={"close": "VIX_close"})
+    df_vix = df_vix[["date", "close"]].rename(columns={"close": "VIX"})
     df_features = pd.merge(df_stock, df_vix, on="date", how="left")
 
     if os.path.exists(sentiment_path):
@@ -77,25 +78,41 @@ def engineered_features(
             f"No se encontró archivo de sentimiento en {sentiment_path}. Se omitirá."
         )
 
+    # 1. Convertir la columna 'date' a datetime
+    df_features["date"] = pd.to_datetime(df_features["date"])
+    # Añadir características temporales
+    df_features["day_of_week"] = df_features["date"].dt.dayofweek
+    df_features["month"] = df_features["date"].dt.month
+    df_features["quarter"] = df_features["date"].dt.quarter
+    df_features["year"] = df_features["date"].dt.year
+    df_features["day_of_month"] = df_features["date"].dt.day
+    df_features["week_of_year"] = df_features["date"].dt.isocalendar().week
+
+    # Añadir características cíclicas
+    df_features["month_sin"] = np.sin(2 * np.pi * df_features["month"] / 12)
+    df_features["month_cos"] = np.cos(2 * np.pi * df_features["month"] / 12)
+    df_features["day_sin"] = np.sin(2 * np.pi * df_features["day_of_week"] / 7)
+    df_features["day_cos"] = np.cos(2 * np.pi * df_features["day_of_week"] / 7)
+
+    # Crear interacciones entre variables clave
+    # 'Return_5d' no está en el DataFrame, por lo que se eliminará por ahora.
+    # Necesitaríamos recalcular los retornos si se quieren usar.
+    df_features["sentiment_volume_interaction"] = (
+        df_features["sentimiento_promedio"] * df_features["volume"]
+    )
+    df_features["vix_rsi_interaction"] = df_features["VIX"] * df_features["RSI"] / 100
+
     print(df_features.head(5))
     context.log.info("Calculando indicadores técnicos...")
     df_features.sort_values("date", inplace=True)
     df_features.reset_index(drop=True, inplace=True)
 
-    df_features["daily_return"] = df_features["close"].pct_change()
-    df_features["SMA_10"] = df_features["close"].rolling(window=10).mean()
-    df_features["SMA_50"] = df_features["close"].rolling(window=50).mean()
-    df_features["volatilidad_10d"] = (
-        df_features["daily_return"].rolling(window=10).std()
-    )
-
-    df_features["target_direction"] = (
-        df_features["close"].shift(-1) > df_features["close"]
-    ).astype(int)
-
     filas_antes = len(df_features)
     df_features.dropna(inplace=True)
     context.log.info(f"Filas limpiadas (NaNs): {filas_antes - len(df_features)}")
+
+    print(df_features.head(5))
+    df_features.to_csv("test.csv", index=False)
 
     # Validar el dataset final de features antes de guardar
     validate_df(

@@ -7,7 +7,7 @@ from dagster import (
 
 # Importamos nuestros módulos que contienen los assets
 from .etl import social, stock, feature_engineering, social_daily, history
-from .training import train
+from .training import rf_train, xgboost_train, lstm_train
 from .inference import predict
 
 
@@ -16,7 +16,7 @@ ingestion_assets = load_assets_from_modules([stock])
 feateng_assets = load_assets_from_modules([feature_engineering])
 social_assets = load_assets_from_modules([social])
 social_daily_assets = load_assets_from_modules([social_daily])
-train_assets = load_assets_from_modules([train])
+train_assets = load_assets_from_modules([rf_train, xgboost_train, lstm_train])
 inference_assets = load_assets_from_modules([predict])
 history_assets = load_assets_from_modules([history])
 

@@ -10,7 +10,7 @@ class EngineeredFeaturesRow(BaseModel):
     low: float
     open: float
     volume: int
-    VIX_close: float
+    VIX: float
     daily_return: float
     SMA_10: float
     SMA_50: float
