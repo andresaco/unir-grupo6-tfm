@@ -22,7 +22,8 @@ class InferenceConfig(Config):
 
     company_name: str = "Apple"
     ticker: str = "AAPL"
-    dataset_path: str = "data/03_features/AAPL/features/features.csv"
+    dataset_path: str = "data/03_features/features/AAPL/features.csv"
+    model_name: str = "Apple_Trading_Model"
 
 
 @asset(
@@ -78,7 +79,7 @@ def generate_trading_signals(
     X_inference = X_inference.select_dtypes(include=["number"])
 
     # 4. Intentar cargar el modelo productivo desde el Model Registry de MLflow
-    model_name = f"{config.company_name}_Trading_Model"
+    model_name = config.model_name
     model_uri_production = f"models:/{model_name}/Production"
     model_uri_latest = f"models:/{model_name}/latest"
 
@@ -132,7 +133,9 @@ def generate_trading_signals(
     # 7. Almacenamiento local del artefacto
     output_dir = "data/04_predictions"
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"{config.ticker}_trading_signals.csv")
+    output_path = os.path.join(
+        output_dir, f"{config.ticker}_{model_name}_trading_signals.csv"
+    )
     df_to_save.to_csv(output_path, index=False)
 
     context.log.info(f"Señales operativas guardadas exitosamente en {output_path}")
