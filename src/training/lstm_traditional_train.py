@@ -210,7 +210,7 @@ def lstm_traditional_training(
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
 
     # Configurar MLflow
-    experiment_name = f"{config.name}_traditional"
+    experiment_name = f"{config.name}"
     try:
         # Se crea con artifact_location explícito para que no se cree en la raíz
         mlflow.create_experiment(

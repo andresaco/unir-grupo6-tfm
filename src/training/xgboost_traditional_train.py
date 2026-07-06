@@ -112,7 +112,7 @@ def xgboost_traditional_training(
     X_train_balanced, y_train_balanced = smote.fit_resample(X_train_scaled, y_train)
 
     # Configurar MLflow
-    experiment_name = f"{config.name}_traditional"
+    experiment_name = f"{config.name}"
     try:
         # Se crea con artifact_location explícito para que no se cree en la raíz
         mlflow.create_experiment(
@@ -123,7 +123,7 @@ def xgboost_traditional_training(
         pass
     mlflow.set_experiment(experiment_name)
 
-    with mlflow.start_run(run_name="XGBoost_Classifier_Traditional") as run:
+    with mlflow.start_run(run_name="XGBoost_Classifier_NO_SENTIMENT") as run:
         # Definir hiperparámetros
         params = {
             "n_estimators": config.n_estimators,
