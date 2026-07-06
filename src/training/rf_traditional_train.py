@@ -38,15 +38,15 @@ class TrainingConfig(Config):
 
 @asset(
     group_name="training",
-    description="Entrena el modelo financiero y registra los artefactos y métricas en MLflow.",
+    description="Entrena el modelo RandomForest tradicional (sin sentimientos) y registra los artefactos y métricas en MLflow.",
 )
-def financial_model_training(
+def rf_traditional_training(
     context: AssetExecutionContext, config: TrainingConfig
 ) -> MaterializeResult:
     """
     Asset que lee las características preparadas, filtra por rango de fechas (criba),
-    entrena un modelo predictivo para la dirección del precio con los hiperparámetros
-    definidos en la configuración, y lo registra en el Model Registry de MLflow.
+    descarta columnas de sentimientos/redes sociales, entrena un modelo predictivo
+    con RandomForest, y lo registra en el Model Registry de MLflow.
     """
     ticker = config.ticker
     # 1. Cargar las features (Asumimos que un pipeline ETL previo las guardó aquí)
@@ -61,7 +61,7 @@ def financial_model_training(
 
     # Validar features cargadas
     validate_df(
-        df, EngineeredFeaturesRow, stage="financial_model_training (read features)"
+        df, EngineeredFeaturesRow, stage="rf_traditional_training (read features)"
     )
 
     # Criba de datos basada en las fechas especificadas en la configuración
@@ -79,7 +79,23 @@ def financial_model_training(
     y = df["target_direction"]
     X = df.drop(columns=["target_direction"])
 
-    # 2. LA CORRECCIÓN: Filtramos X para quedarnos SOLO con columnas numéricas
+    # Descarta datos con origen redes sociales
+    social_cols = [
+        "fecha",
+        "volumen_noticias",
+        "sentimiento_promedio",
+        "puntuacion_positiva",
+        "puntuacion_negativa",
+        "polaridad_promedio",
+        "volatilidad_sentimiento",
+        "uso_primera_persona",
+        "sentiment_volume_interaction",
+    ]
+    X = X.drop(
+        columns=[col for col in social_cols if col in X.columns], errors="ignore"
+    )
+
+    # Filtramos X para quedarnos SOLO con columnas numéricas
     X = X.select_dtypes(include=["number"])
 
     # División temporal (no aleatoria, vital en series financieras)
@@ -88,7 +104,7 @@ def financial_model_training(
     y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
 
     # 2. Configurar MLflow
-    experiment_name = config.name
+    experiment_name = f"{config.name}_traditional"
     try:
         # Se crea con artifact_location explícito para que no se cree en la raíz
         mlflow.create_experiment(
@@ -99,7 +115,7 @@ def financial_model_training(
         pass
     mlflow.set_experiment(experiment_name)
 
-    with mlflow.start_run(run_name="RandomForest_Ensemble") as run:
+    with mlflow.start_run(run_name="RandomForest_Ensemble_Traditional") as run:
         # Definir hiperparámetros dinámicamente desde el config
         params = {
             "n_estimators": config.n_estimators,
@@ -110,7 +126,9 @@ def financial_model_training(
         mlflow.log_params(params)
 
         # 3. Entrenamiento del Modelo
-        context.log.info("Iniciando el entrenamiento del modelo Ensemble...")
+        context.log.info(
+            "Iniciando el entrenamiento del modelo Ensemble Tradicional..."
+        )
         model = RandomForestClassifier(**params)
         model.fit(X_train, y_train)
 
@@ -129,11 +147,10 @@ def financial_model_training(
         )
 
         # 5. Registrar el modelo en MLflow
-        # Esto guarda el .pkl internamente y versiona el modelo
         model_info = mlflow.sklearn.log_model(
             sk_model=model,
             artifact_path="random_forest_model",
-            registered_model_name=f"{config.name}_RandomForest_Model",
+            registered_model_name=f"{config.name}_RandomForest_Model_traditional",
         )
 
         model_uri = model_info.model_uri
@@ -144,7 +161,7 @@ def financial_model_training(
         eval_data["target_direction"] = y_test
 
         context.log.info(
-            "Iniciando la evaluación de Random Forest con MLflow y cálculo de SHAP..."
+            "Iniciando la evaluación de Random Forest tradicional con MLflow y cálculo de SHAP..."
         )
         mlflow.models.evaluate(
             model=model_uri,

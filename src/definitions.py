@@ -9,7 +9,14 @@ from dagster import (
 
 # Importamos nuestros módulos que contienen los assets
 from .etl import social, stock, feature_engineering, social_daily, history
-from .training import rf_train, xgboost_train, lstm_train
+from .training import (
+    rf_train,
+    xgboost_train,
+    lstm_train,
+    rf_traditional_train,
+    xgboost_traditional_train,
+    lstm_traditional_train,
+)
 from .inference import predict, backtesting
 
 
@@ -18,7 +25,16 @@ ingestion_assets = load_assets_from_modules([stock])
 feateng_assets = load_assets_from_modules([feature_engineering])
 social_assets = load_assets_from_modules([social])
 social_daily_assets = load_assets_from_modules([social_daily])
-train_assets = load_assets_from_modules([rf_train, xgboost_train, lstm_train])
+train_assets = load_assets_from_modules(
+    [
+        rf_train,
+        xgboost_train,
+        lstm_train,
+        rf_traditional_train,
+        xgboost_traditional_train,
+        lstm_traditional_train,
+    ]
+)
 inference_assets = load_assets_from_modules([predict, backtesting])
 history_assets = load_assets_from_modules([history])
 
@@ -143,6 +159,18 @@ def daily_production_pipeline_schedule(context):
     )
 
 
+# Job para entrenar los modelos tradicionales (sin sentimientos)
+training_no_sentiment_job = define_asset_job(
+    name="training_no_sentimento",
+    selection=AssetSelection.assets(
+        "rf_traditional_training",
+        "xgboost_traditional_training",
+        "lstm_traditional_training",
+    ),
+    description="Entrena los modelos RandomForest, XGBoost y LSTM tradicionales que descartan datos de redes sociales.",
+)
+
+
 # Definimos el repositorio global
 defs = Definitions(
     assets=all_assets,
@@ -153,6 +181,7 @@ defs = Definitions(
         gdelt_download_job,
         backtest_pipeline_job,
         daily_production_pipeline_job,
+        training_no_sentiment_job,
     ],
     schedules=[
         daily_production_pipeline_schedule,
