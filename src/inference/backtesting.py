@@ -98,6 +98,26 @@ def predict_helper(
     """
     Ejecuta predicciones adaptando el formato de entrada y escalado según el tipo de modelo.
     """
+    if "traditional" in model_name.lower():
+        context.log.info(
+            f"El modelo '{model_name}' es tradicional. Eliminando columnas de sentimiento."
+        )
+        social_cols = [
+            "fecha",
+            "volumen_noticias",
+            "sentimiento_promedio",
+            "puntuacion_positiva",
+            "puntuacion_negativa",
+            "polaridad_promedio",
+            "volatilidad_sentimiento",
+            "uso_primera_persona",
+            "sentiment_volume_interaction",
+        ]
+        X_inference = X_inference.drop(
+            columns=[col for col in social_cols if col in X_inference.columns],
+            errors="ignore",
+        )
+
     # 1. Caso del modelo LSTM (PyTorch) - Requiere 3D inputs [batch, seq_len, features] y escalado
     if "LSTM" in model_name:
         context.log.info(
