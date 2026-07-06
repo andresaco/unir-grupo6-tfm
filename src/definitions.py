@@ -50,8 +50,8 @@ all_assets = (
 )
 
 # 1. Job para descargar datos de mercado coordinadamente (Stock + VIX)
-market_download_job = define_asset_job(
-    name="download_stock_and_vix_job",
+pre_market_download_job = define_asset_job(
+    name="pre_market_download_job",
     selection=AssetSelection.assets(
         "raw_stock_data",
         "raw_vix_data",
@@ -64,8 +64,8 @@ market_download_job = define_asset_job(
 
 # 1. Creamos el Job específico para el pipeline social
 # Ejecutará en estricto orden: raw_social_data -> processed_social_data -> social_sentiment_analysis
-social_pipeline_job = define_asset_job(
-    name="run_social_sentiment_pipeline",
+pre_social_pipeline_job = define_asset_job(
+    name="pre_social_pipeline_job",
     selection=AssetSelection.assets(
         "raw_social_data", "processed_social_data", "social_sentiment_analysis"
     ),
@@ -73,8 +73,8 @@ social_pipeline_job = define_asset_job(
 )
 
 # 2. Creamos el Job específico para el pipeline social de top diario
-social_daily_top_pipeline_job = define_asset_job(
-    name="run_social_daily_top_pipeline",
+pre_social_daily_top_pipeline_job = define_asset_job(
+    name="pre_social_daily_top_pipeline_job",
     selection=AssetSelection.assets(
         "raw_daily_social_data",
         "processed_daily_social_data",
@@ -85,8 +85,8 @@ social_daily_top_pipeline_job = define_asset_job(
 )
 
 # 3. Job específico para descargar y procesar los datos históricos de GDELT
-gdelt_download_job = define_asset_job(
-    name="download_gdelt",
+pre_gdelt_download_job = define_asset_job(
+    name="pre_gdelt_download_job",
     selection=AssetSelection.assets(
         "raw_gdelt_sentiment_data",
         "processed_gdelt_sentiment_data",
@@ -96,16 +96,16 @@ gdelt_download_job = define_asset_job(
 
 
 # Job específico para ejecutar el backtesting de todos los modelos
-backtest_pipeline_job = define_asset_job(
-    name="run_backtest_pipeline",
+pre_backtesting_job = define_asset_job(
+    name="pre_backtesting_job",
     selection=AssetSelection.assets("run_backtest"),
     description="Ejecuta la evaluación histórica comparativa sobre todos los modelos de Machine Learning registrados en MLflow.",
 )
 
 
 # Job para el pipeline de producción diario que integra mercado, redes sociales y predicción
-daily_production_pipeline_job = define_asset_job(
-    name="daily_production_pipeline",
+prod_daily_order_job = define_asset_job(
+    name="prod_daily_order_job",
     selection=AssetSelection.assets(
         "raw_stock_data",
         "raw_vix_data",
@@ -118,17 +118,31 @@ daily_production_pipeline_job = define_asset_job(
         "aggregated_daily_social_sentiment",
         "daily_prediction",
     ),
+    tags={"type": "producción"},
     description="Ejecuta el pipeline de producción diario: descarga datos de mercado, descarga y analiza sentimientos de Bluesky, selecciona el mejor modelo de MLflow y genera predicciones.",
+)
+
+
+# Job para entrenar los modelos tradicionales (sin sentimientos)
+test_training_no_sentiment_job = define_asset_job(
+    name="test_training_no_sentiment_job",
+    selection=AssetSelection.assets(
+        "rf_traditional_training",
+        "xgboost_traditional_training",
+        "lstm_traditional_training",
+    ),
+    tags={"type": "test"},
+    description="Entrena los modelos RandomForest, XGBoost y LSTM tradicionales que descartan datos de redes sociales.",
 )
 
 
 @schedule(
     cron_schedule="0 23 * * 1-5",  # De lunes a viernes a las 23:00 (cierre de mercado)
-    job=daily_production_pipeline_job,
-    name="daily_production_pipeline_schedule",
+    job=prod_daily_order_job,
+    name="prod_daily_order_schedule",
     description="Ejecuta diariamente el pipeline de producción para AAPL con la fecha actual.",
 )
-def daily_production_pipeline_schedule(context):
+def programacion_prod_daily_order_job(context):
     """
     Planificación diaria para el pipeline de producción. Genera la predicción
     para el día de hoy pasando la fecha actual como parámetro de configuración.
@@ -159,31 +173,19 @@ def daily_production_pipeline_schedule(context):
     )
 
 
-# Job para entrenar los modelos tradicionales (sin sentimientos)
-training_no_sentiment_job = define_asset_job(
-    name="training_no_sentimento",
-    selection=AssetSelection.assets(
-        "rf_traditional_training",
-        "xgboost_traditional_training",
-        "lstm_traditional_training",
-    ),
-    description="Entrena los modelos RandomForest, XGBoost y LSTM tradicionales que descartan datos de redes sociales.",
-)
-
-
 # Definimos el repositorio global
 defs = Definitions(
     assets=all_assets,
     jobs=[
-        social_pipeline_job,
-        market_download_job,
-        social_daily_top_pipeline_job,
-        gdelt_download_job,
-        backtest_pipeline_job,
-        daily_production_pipeline_job,
-        training_no_sentiment_job,
+        pre_social_pipeline_job,
+        pre_market_download_job,
+        pre_social_daily_top_pipeline_job,
+        pre_gdelt_download_job,
+        pre_backtesting_job,
+        test_training_no_sentiment_job,
+        prod_daily_order_job,
     ],
     schedules=[
-        daily_production_pipeline_schedule,
+        programacion_prod_daily_order_job,
     ],
 )
