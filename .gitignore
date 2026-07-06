@@ -38,6 +38,4 @@ perfil_X_DesktopApp/
 
 # Archivos de datos extraídos y logs
 *.log
-data/
-models/
 runtime/
