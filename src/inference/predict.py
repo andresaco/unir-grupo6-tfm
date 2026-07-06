@@ -376,40 +376,44 @@ def daily_prediction(
     ]
 
     best_model_name = None
-    best_accuracy = -1.0
-    # best_run_id = None
+    best_version = None
+    best_accuracy = 0.0
 
-    context.log.info("Buscando el modelo con mejores métricas (accuracy) en MLflow...")
+    context.log.info("Buscando el modelo con el alias 'champion' en MLflow...")
     for name in model_names:
         try:
-            versions = client.get_latest_versions(name)
-            if not versions:
-                continue
-            latest_version = versions[0]
-            run_id = latest_version.run_id
-            run = client.get_run(run_id)
-            accuracy = run.data.metrics.get("accuracy", 0.0)
-            context.log.info(f"Modelo {name}: accuracy = {accuracy:.4f}")
-            if accuracy > best_accuracy:
-                best_accuracy = accuracy
+            model_version = client.get_model_version_by_alias(name, "champion")
+            if model_version:
                 best_model_name = name
-                # best_run_id = run_id
-        except Exception as e:
-            context.log.warning(f"Error consultando modelo {name} en MLflow: {e}")
+                best_version = model_version.version
+                # Obtener la precisión (accuracy) del run original
+                run = client.get_run(model_version.run_id)
+                best_accuracy = float(run.data.metrics.get("accuracy", 0.0))
+                break
+        except Exception:
+            continue
 
     if not best_model_name:
         context.log.warning(
-            "No se encontró ningún modelo en MLflow. Usando RandomForest de respaldo..."
+            "No se encontró ningún modelo con alias 'champion' en MLflow. Usando RandomForest de respaldo..."
         )
         best_model_name = f"{config.name}_Trading_Model"
+        best_version = "Latest"
         best_accuracy = 0.0
-
-    context.log.info(
-        f"Modelo seleccionado para inferencia diaria: {best_model_name} (accuracy: {best_accuracy:.4f})"
-    )
-
-    # Cargar el modelo óptimo
-    model, selected_uri = load_model_helper(best_model_name, context)
+        # Cargar de respaldo sin alias usando load_model_helper
+        model, selected_uri = load_model_helper(best_model_name, context)
+    else:
+        context.log.info(
+            f"Modelo seleccionado para inferencia diaria (alias 'champion'): {best_model_name} (Versión: {best_version}, Accuracy: {best_accuracy:.4f})"
+        )
+        try:
+            model, selected_uri = load_model_helper(
+                best_model_name, context, alias="champion"
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Error cargando el modelo '{best_model_name}' con alias 'champion': {e}"
+            )
 
     # Inferencia adaptada según el sabor del modelo
     if "LSTM" in best_model_name:
@@ -548,5 +552,91 @@ def daily_prediction(
             "last_prediction_date": MetadataValue.text(last_date),
             "last_signal_prediction": MetadataValue.int(last_signal),
             "last_signal_confidence": MetadataValue.float(last_confidence),
+        }
+    )
+
+
+@asset(
+    deps=["daily_prediction"],
+    group_name="inference",
+    description="Genera el order book operativo a partir de las predicciones diarias de la señal de trading, calculando métricas de equidad y señales de compra/venta/mantener del backtest.",
+)
+def order_book(
+    context: AssetExecutionContext, config: StockDownloadConfig
+) -> MaterializeResult:
+    ticker = config.ticker
+    predictions_path = f"data/04_predictions/{ticker}_trading_signals.csv"
+
+    if not os.path.exists(predictions_path):
+        raise FileNotFoundError(
+            f"No se encontró el archivo de predicciones en {predictions_path}. Ejecuta la predicción diaria primero."
+        )
+
+    context.log.info(f"Cargando predicciones desde {predictions_path}...")
+    df = pd.read_csv(predictions_path)
+
+    if df.empty:
+        context.log.warning("El dataset de predicciones está vacío.")
+        return MaterializeResult()
+
+    # 1. Asegurar orden cronológico por fecha
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values(by="date").reset_index(drop=True)
+
+    # 2. Calcular retornos diarios de la cotización
+    df["Returns"] = df["price_close"].pct_change().fillna(0.0)
+
+    # 3. Calcular Buy & Hold Equity
+    capital_inicial = 100000.0
+    df["Buy_Hold_Equity"] = capital_inicial * (1 + df["Returns"]).cumprod()
+
+    # 4. Calcular retornos de la estrategia y equidad (desplazamiento de 1 día)
+    df["Strategy_Returns"] = df["Returns"] * df["predicted_signal"].shift(1).fillna(0.0)
+    df["Strategy_Equity"] = capital_inicial * (1 + df["Strategy_Returns"]).cumprod()
+
+    # 5. Generar señales operativas (transición de posiciones)
+    df["Position"] = df["predicted_signal"].diff()
+    # Para la primera fila, diff() es NaN. Si el primer día el modelo predice 1, compramos (Position = 1).
+    # Si predice 0, nos quedamos en liquidez (Position = 0).
+    df.loc[df.index[0], "Position"] = df.loc[df.index[0], "predicted_signal"]
+
+    df["Buy_Signal"] = df["Position"] == 1
+    df["Sell_Signal"] = df["Position"] == -1
+
+    # Mapeo descriptivo de la acción recomendada
+    def map_trading_action(row):
+        pos = row["Position"]
+        sig = row["predicted_signal"]
+        if pos == 1:
+            return "COMPRA"
+        elif pos == -1:
+            return "VENTA"
+        else:
+            return "MANTENER_POSICION" if sig == 1 else "MANTENER_LIQUIDEZ"
+
+    df["Trading_Action"] = df.apply(map_trading_action, axis=1)
+
+    # Convertir fecha de nuevo a string para consistencia de guardado
+    df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+
+    # Guardar únicamente en el fichero oficial por ticker
+    output_path = f"data/04_predictions/{ticker}_order_book.csv"
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    df.to_csv(output_path, index=False)
+    context.log.info(f"Order book guardado en: {output_path}")
+
+    return MaterializeResult(
+        metadata={
+            "ticker": MetadataValue.text(ticker),
+            "total_days": MetadataValue.int(len(df)),
+            "capital_inicial": MetadataValue.float(capital_inicial),
+            "final_bh_equity": MetadataValue.float(
+                float(df["Buy_Hold_Equity"].iloc[-1])
+            ),
+            "final_strategy_equity": MetadataValue.float(
+                float(df["Strategy_Equity"].iloc[-1])
+            ),
+            "buy_signals_count": MetadataValue.int(int(df["Buy_Signal"].sum())),
+            "sell_signals_count": MetadataValue.int(int(df["Sell_Signal"].sum())),
         }
     )

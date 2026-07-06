@@ -64,6 +64,7 @@ CONFIGURABLE_ASSETS = {
     "aggregated_daily_social_sentiment",
     "daily_prediction",
     "engineered_features",
+    "order_book",
 }
 
 
@@ -237,6 +238,7 @@ prod_daily_order_job = define_asset_job(
         "daily_social_sentiment_analysis",
         "aggregated_daily_social_sentiment",
         "daily_prediction",
+        "order_book",
     ),
     config=make_shared_config(
         [
@@ -250,6 +252,7 @@ prod_daily_order_job = define_asset_job(
             "daily_social_sentiment_analysis",
             "aggregated_daily_social_sentiment",
             "daily_prediction",
+            "order_book",
         ]
     ),
     tags={"type": "producción"},

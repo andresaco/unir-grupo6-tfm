@@ -31,35 +31,40 @@ class BacktestConfig(Config):
     ]
 
 
-def load_model_helper(model_name: str, context: AssetExecutionContext):
+def load_model_helper(
+    model_name: str, context: AssetExecutionContext, alias: str = None
+):
     """
-    Carga un modelo desde el Model Registry de MLflow intentando usar su stage 'Production'
-    o la versión 'latest' como respaldo. Intenta usar el cargador específico de su sabor.
+    Carga un modelo desde el Model Registry de MLflow intentando usar un alias específico,
+    el stage 'Production' o la versión 'latest' como respaldo. Intenta usar el cargador específico de su sabor.
     """
-    model_uri_production = f"models:/{model_name}/Production"
-    model_uri_latest = f"models:/{model_name}/latest"
-
-    selected_uri = None
     client = MlflowClient()
 
-    # Intentar buscar si existe versión en Production
-    try:
-        versions = client.get_latest_versions(model_name, stages=["Production"])
-        if versions:
-            selected_uri = model_uri_production
-            context.log.info(
-                f"Cargando modelo '{model_name}' desde Production stage..."
-            )
-        else:
+    if alias:
+        selected_uri = f"models:/{model_name}@{alias}"
+        context.log.info(f"Cargando modelo '{model_name}' usando el alias '{alias}'...")
+    else:
+        model_uri_production = f"models:/{model_name}/Production"
+        model_uri_latest = f"models:/{model_name}/latest"
+
+        # Intentar buscar si existe versión en Production
+        try:
+            versions = client.get_latest_versions(model_name, stages=["Production"])
+            if versions:
+                selected_uri = model_uri_production
+                context.log.info(
+                    f"Cargando modelo '{model_name}' desde Production stage..."
+                )
+            else:
+                selected_uri = model_uri_latest
+                context.log.info(
+                    f"Cargando modelo '{model_name}' desde la versión Latest..."
+                )
+        except Exception:
             selected_uri = model_uri_latest
             context.log.info(
-                f"Cargando modelo '{model_name}' desde la versión Latest..."
+                f"Cargando modelo '{model_name}' desde la versión Latest (fallback)..."
             )
-    except Exception:
-        selected_uri = model_uri_latest
-        context.log.info(
-            f"Cargando modelo '{model_name}' desde la versión Latest (fallback)..."
-        )
 
     # Carga sabor-específica con fallbacks
     if "XGBoost" in model_name:
