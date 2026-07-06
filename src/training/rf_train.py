@@ -133,7 +133,7 @@ def financial_model_training(
         model_info = mlflow.sklearn.log_model(
             sk_model=model,
             artifact_path="random_forest_model",
-            registered_model_name=f"{config.name}_Trading_Model",
+            registered_model_name=f"{config.name}_RandomForest_Model",
         )
 
         model_uri = model_info.model_uri
