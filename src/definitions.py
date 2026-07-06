@@ -5,6 +5,7 @@ from dagster import (
     AssetSelection,
     schedule,
     RunConfig,
+    config_mapping,
 )
 
 # Importamos nuestros módulos que contienen los assets
@@ -49,6 +50,57 @@ all_assets = (
     + history_assets
 )
 
+# Conjunto de assets que aceptan configuración del tipo StockDownloadConfig
+CONFIGURABLE_ASSETS = {
+    "raw_stock_data",
+    "raw_vix_data",
+    "processed_stock_data",
+    "processed_vix_data",
+    "incremental_market_data",
+    "raw_gdelt_sentiment_data",
+    "processed_gdelt_sentiment_data",
+    "raw_social_data",
+    "raw_daily_social_data",
+    "aggregated_daily_social_sentiment",
+    "daily_prediction",
+    "engineered_features",
+}
+
+
+def make_shared_config(asset_names):
+    """
+    Crea dinámicamente un mapeador de configuración a nivel de Job
+    para todos los assets que admiten StockDownloadConfig.
+    """
+    configurable_assets_in_job = [
+        name for name in asset_names if name in CONFIGURABLE_ASSETS
+    ]
+
+    @config_mapping(
+        config_schema={
+            "ticker": str,
+            "name": str,
+            "initial_date": str,
+            "end_date": str,
+        }
+    )
+    def config_fn(val):
+        config_dict = {
+            "ticker": val["ticker"],
+            "name": val["name"],
+            "initial_date": val["initial_date"],
+            "end_date": val["end_date"],
+        }
+        return {
+            "ops": {
+                asset_name: {"config": config_dict}
+                for asset_name in configurable_assets_in_job
+            }
+        }
+
+    return config_fn
+
+
 # 1. Job para descargar datos de mercado coordinadamente (Stock + VIX)
 pre_market_download_job = define_asset_job(
     name="pre_market_download_job",
@@ -59,20 +111,36 @@ pre_market_download_job = define_asset_job(
         "processed_vix_data",
         "incremental_market_data",
     ),
+    config=make_shared_config(
+        [
+            "raw_stock_data",
+            "raw_vix_data",
+            "processed_stock_data",
+            "processed_vix_data",
+            "incremental_market_data",
+        ]
+    ),
     description="Descarga de forma coordinada y paralela los datos de cotización histórica de acciones y del índice de volatilidad VIX de forma incremental.",
 )
 
-# 1. Creamos el Job específico para el pipeline social
+# 2. Creamos el Job específico para el pipeline social
 # Ejecutará en estricto orden: raw_social_data -> processed_social_data -> social_sentiment_analysis
 pre_social_pipeline_job = define_asset_job(
     name="pre_social_pipeline_job",
     selection=AssetSelection.assets(
         "raw_social_data", "processed_social_data", "social_sentiment_analysis"
     ),
+    config=make_shared_config(
+        [
+            "raw_social_data",
+            "processed_social_data",
+            "social_sentiment_analysis",
+        ]
+    ),
     description="Ejecuta de manera secuencial y coordinada la ingesta, limpieza estructural y análisis NLP de redes sociales.",
 )
 
-# 2. Creamos el Job específico para el pipeline social de top diario
+# 3. Creamos el Job específico para el pipeline social de top diario
 pre_social_daily_top_pipeline_job = define_asset_job(
     name="pre_social_daily_top_pipeline_job",
     selection=AssetSelection.assets(
@@ -81,15 +149,29 @@ pre_social_daily_top_pipeline_job = define_asset_job(
         "daily_social_sentiment_analysis",
         "aggregated_daily_social_sentiment",
     ),
+    config=make_shared_config(
+        [
+            "raw_daily_social_data",
+            "processed_daily_social_data",
+            "daily_social_sentiment_analysis",
+            "aggregated_daily_social_sentiment",
+        ]
+    ),
     description="Extrae los 300 posts más importantes diarios, realiza NLP y agrega los datos por día de forma tolerante a fallos.",
 )
 
-# 3. Job específico para descargar y procesar los datos históricos de GDELT
+# 4. Job específico para descargar y procesar los datos históricos de GDELT
 pre_gdelt_download_job = define_asset_job(
     name="pre_gdelt_download_job",
     selection=AssetSelection.assets(
         "raw_gdelt_sentiment_data",
         "processed_gdelt_sentiment_data",
+    ),
+    config=make_shared_config(
+        [
+            "raw_gdelt_sentiment_data",
+            "processed_gdelt_sentiment_data",
+        ]
     ),
     description="Ejecuta de manera secuencial la descarga y el procesamiento de los datos de sentimiento histórico de GDELT.",
 )
@@ -100,6 +182,44 @@ pre_backtesting_job = define_asset_job(
     name="pre_backtesting_job",
     selection=AssetSelection.assets("run_backtest"),
     description="Ejecuta la evaluación histórica comparativa sobre todos los modelos de Machine Learning registrados en MLflow.",
+)
+
+
+# Job para descargar y procesar datos de GDELT, stock y VIX históricos de forma unificada
+pre_ticker_data = define_asset_job(
+    name="pre_ticker_data",
+    selection=AssetSelection.assets(
+        "raw_gdelt_sentiment_data",
+        "processed_gdelt_sentiment_data",
+        "raw_stock_data",
+        "raw_vix_data",
+        "processed_stock_data",
+        "processed_vix_data",
+        "incremental_market_data",
+    ),
+    config=make_shared_config(
+        [
+            "raw_gdelt_sentiment_data",
+            "processed_gdelt_sentiment_data",
+            "raw_stock_data",
+            "raw_vix_data",
+            "processed_stock_data",
+            "processed_vix_data",
+            "incremental_market_data",
+        ]
+    ),
+    tags={"circuit": "desarrollo"},
+    description="Job unificado de desarrollo para descargar y procesar datos históricos de GDELT, stock y VIX.",
+)
+
+
+# Job de desarrollo para ejecutar la ingeniería de características (Feature Engineering)
+pre_feature_engineering = define_asset_job(
+    name="pre_feature_engineering",
+    selection=AssetSelection.assets("engineered_features"),
+    config=make_shared_config(["engineered_features"]),
+    tags={"circuit": "desarrollo"},
+    description="Job de desarrollo para calcular las características de ingeniería (features).",
 )
 
 
@@ -117,6 +237,20 @@ prod_daily_order_job = define_asset_job(
         "daily_social_sentiment_analysis",
         "aggregated_daily_social_sentiment",
         "daily_prediction",
+    ),
+    config=make_shared_config(
+        [
+            "raw_stock_data",
+            "raw_vix_data",
+            "processed_stock_data",
+            "processed_vix_data",
+            "incremental_market_data",
+            "raw_daily_social_data",
+            "processed_daily_social_data",
+            "daily_social_sentiment_analysis",
+            "aggregated_daily_social_sentiment",
+            "daily_prediction",
+        ]
     ),
     tags={"type": "producción"},
     description="Ejecuta el pipeline de producción diario: descarga datos de mercado, descarga y analiza sentimientos de Bluesky, selecciona el mejor modelo de MLflow y genera predicciones.",
@@ -152,23 +286,12 @@ def programacion_prod_daily_order_job(context):
     # Obtenemos la fecha actual en formato YYYY-MM-DD
     today_str = datetime.date.today().strftime("%Y-%m-%d")
 
-    config_dict = {
-        "ticker": "AAPL",
-        "name": "Apple",
-        "initial_date": today_str,
-        "end_date": today_str,
-    }
-
     return RunConfig(
-        ops={
-            "raw_stock_data": {"config": config_dict},
-            "raw_vix_data": {"config": config_dict},
-            "processed_stock_data": {"config": config_dict},
-            "processed_vix_data": {"config": config_dict},
-            "incremental_market_data": {"config": config_dict},
-            "raw_daily_social_data": {"config": config_dict},
-            "aggregated_daily_social_sentiment": {"config": config_dict},
-            "daily_prediction": {"config": config_dict},
+        config={
+            "ticker": "AAPL",
+            "name": "Apple",
+            "initial_date": today_str,
+            "end_date": today_str,
         }
     )
 
@@ -184,6 +307,8 @@ defs = Definitions(
         pre_backtesting_job,
         test_training_no_sentiment_job,
         prod_daily_order_job,
+        pre_ticker_data,
+        pre_feature_engineering,
     ],
     schedules=[
         programacion_prod_daily_order_job,

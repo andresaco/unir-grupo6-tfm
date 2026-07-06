@@ -35,7 +35,7 @@ def engineered_features(
     safe_name = str(config.name).lower().replace(" ", "_")
     dynamic_sentiment_path = f"data/02_processed/sentiment/gdelt_{safe_name}_avanzado_{start_date}_a_{end_date}.csv"
     fallback_sentiment_path = (
-        "data/01_raw/sentiment/gdelt_apple_avanzado_2020-01-01_a_2026-12-31.csv"
+        "data/01_raw/sentiment/gdelt_apple_avanzado_2021-01-01_a_2026-06-30.csv"
     )
     sentiment_path = (
         dynamic_sentiment_path
@@ -75,8 +75,19 @@ def engineered_features(
             df_features["sentiment_score"] = df_features["sentiment_score"].fillna(0)
     else:
         context.log.warning(
-            f"No se encontró archivo de sentimiento en {sentiment_path}. Se omitirá."
+            f"No se encontró archivo de sentimiento en {sentiment_path}. Se usarán valores por defecto."
         )
+        for col in [
+            "volumen_noticias",
+            "sentimiento_promedio",
+            "puntuacion_positiva",
+            "puntuacion_negativa",
+            "polaridad_promedio",
+            "volatilidad_sentimiento",
+            "uso_primera_persona",
+        ]:
+            df_features[col] = 0.0
+        df_features["sentiment_score"] = 0.0
 
     # 1. Convertir la columna 'date' a datetime
     df_features["date"] = pd.to_datetime(df_features["date"])
