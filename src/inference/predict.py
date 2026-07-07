@@ -579,15 +579,19 @@ def order_book(
         context.log.warning("El dataset de predicciones está vacío.")
         return MaterializeResult()
 
-    # 1. Asegurar orden cronológico por fecha
+    # 1. Asegurar orden cronológico por fecha y filtrar por rango de fechas
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values(by="date").reset_index(drop=True)
+
+    start_dt = pd.to_datetime(config.initial_date)
+    end_dt = pd.to_datetime(config.end_date)
+    df = df[(df["date"] >= start_dt) & (df["date"] <= end_dt)].reset_index(drop=True)
 
     # 2. Calcular retornos diarios de la cotización
     df["Returns"] = df["price_close"].pct_change().fillna(0.0)
 
     # 3. Calcular Buy & Hold Equity
-    capital_inicial = 100000.0
+    capital_inicial = 10000.0
     df["Buy_Hold_Equity"] = capital_inicial * (1 + df["Returns"]).cumprod()
 
     # 4. Calcular retornos de la estrategia y equidad (desplazamiento de 1 día)
